@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { parseEmailsFromCSV } from '@/lib/csv-parser';
+import { storeEmails } from '@/lib/email-store';
 import { processCampaign } from '@/lib/worker';
 
-// GET /api/campaigns — list all campaigns (newest first)
+// GET /api/campaigns — list recent campaigns
 export async function GET() {
   const campaigns = await prisma.campaign.findMany({
     orderBy: { createdAt: 'desc' },
@@ -11,39 +13,52 @@ export async function GET() {
   return NextResponse.json(campaigns);
 }
 
-// POST /api/campaigns — create and kick off a campaign
+// POST /api/campaigns — accepts multipart/form-data: subject + content + CSV file
+// Emails are parsed from the uploaded CSV and held in memory only — never stored in the DB.
 export async function POST(req: NextRequest) {
   try {
-    const { subject, content } = await req.json();
+    const formData = await req.formData();
+    const subject = (formData.get('subject') as string | null)?.trim();
+    const content = (formData.get('content') as string | null)?.trim();
+    const file = formData.get('file') as File | null;
 
-    if (!subject?.trim() || !content?.trim()) {
+    if (!subject || !content) {
       return NextResponse.json(
         { error: 'Subject and content are required' },
         { status: 400 }
       );
     }
 
-    const emailCount = await prisma.email.count();
-    if (emailCount === 0) {
+    if (!file) {
       return NextResponse.json(
-        { error: 'No email addresses in the database. Upload a CSV first.' },
+        { error: 'A CSV file with recipient email addresses is required' },
+        { status: 400 }
+      );
+    }
+
+    const csvText = await file.text();
+    const emails = parseEmailsFromCSV(csvText);
+
+    if (emails.length === 0) {
+      return NextResponse.json(
+        { error: 'No valid email addresses found in the uploaded CSV' },
         { status: 400 }
       );
     }
 
     const campaign = await prisma.campaign.create({
       data: {
-        subject: subject.trim(),
-        content: content.trim(),
+        subject,
+        content,
         status: 'queued',
-        totalRecipients: emailCount,
+        totalRecipients: emails.length,
       },
     });
 
+    // Store emails in memory — not in the database
+    storeEmails(campaign.id, emails);
+
     // Fire-and-forget background processing
-    // NOTE: on serverless platforms this will be killed when the response returns.
-    // For Vercel: use a separate worker service or Vercel Cron.
-    // For Railway/Render: this works fine as a long-running process.
     processCampaign(campaign.id).catch((err) => {
       console.error('[campaign worker error]', err);
     });

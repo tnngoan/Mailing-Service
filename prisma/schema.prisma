@@ -7,14 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Email {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  createdAt DateTime @default(now())
-
-  @@index([email])
-}
-
 model Campaign {
   id              Int      @id @default(autoincrement())
   subject         String

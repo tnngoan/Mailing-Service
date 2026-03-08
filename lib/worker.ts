@@ -1,19 +1,15 @@
 /**
  * Background worker for processing email campaigns.
- *
- * Runs in the same Node.js process as the Next.js server.
- * Uses an async loop with intentional delays between batches
- * to stay within SendGrid rate limits.
- *
- * For very large lists (500k+) on serverless (Vercel), consider
- * moving this to a separate long-running service (Railway / Render).
+ * Email addresses are read from the in-memory store (never from the DB).
+ * The store entry is cleared once sending completes or fails.
  */
 
 import { prisma } from './prisma';
 import { sendBatch } from './sendgrid';
+import { getEmails, clearEmails } from './email-store';
 
 const BATCH_SIZE = 500;
-const BATCH_DELAY_MS = 1500; // 1.5s between batches
+const BATCH_DELAY_MS = 1500; // 1.5 s between batches — stays within SendGrid rate limits
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -21,64 +17,48 @@ function sleep(ms: number) {
 
 export async function processCampaign(campaignId: number): Promise<void> {
   try {
-    const campaign = await prisma.campaign.findUnique({
-      where: { id: campaignId },
-    });
+    const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
 
     if (!campaign) {
       console.error(`[worker] Campaign ${campaignId} not found`);
       return;
     }
 
-    const totalRecipients = await prisma.email.count();
+    const emails = getEmails(campaignId);
+
+    if (emails.length === 0) {
+      console.error(`[worker] Campaign ${campaignId}: no emails in store`);
+      await prisma.campaign.update({
+        where: { id: campaignId },
+        data: { status: 'failed' },
+      });
+      return;
+    }
 
     await prisma.campaign.update({
       where: { id: campaignId },
-      data: { status: 'sending', totalRecipients, sentCount: 0, failedCount: 0 },
+      data: { status: 'sending', totalRecipients: emails.length, sentCount: 0, failedCount: 0 },
     });
 
-    let cursor: number | undefined = undefined;
     let sentCount = 0;
     let failedCount = 0;
 
-    while (true) {
-      const batch: { id: number; email: string }[] =
-        cursor !== undefined
-          ? await prisma.email.findMany({
-              take: BATCH_SIZE,
-              skip: 1,
-              cursor: { id: cursor },
-              orderBy: { id: 'asc' },
-              select: { id: true, email: true },
-            })
-          : await prisma.email.findMany({
-              take: BATCH_SIZE,
-              orderBy: { id: 'asc' },
-              select: { id: true, email: true },
-            });
-
-      if (batch.length === 0) break;
-
-      const emailAddresses = batch.map((e) => e.email);
+    for (let i = 0; i < emails.length; i += BATCH_SIZE) {
+      const batch = emails.slice(i, i + BATCH_SIZE);
 
       console.log(
-        `[worker] Campaign ${campaignId}: sending batch of ${batch.length} (total sent so far: ${sentCount})`
+        `[worker] Campaign ${campaignId}: sending batch ${Math.floor(i / BATCH_SIZE) + 1} (${batch.length} emails, ${sentCount} sent so far)`
       );
 
-      const results = await sendBatch(
-        emailAddresses,
-        campaign.subject,
-        campaign.content
-      );
+      const results = await sendBatch(batch, campaign.subject, campaign.content);
 
       const batchSent = results.filter((r) => r.success).length;
       const batchFailed = results.filter((r) => !r.success).length;
 
       if (batchFailed > 0) {
-        // Log the first failure reason so it's visible in the terminal
         const firstError = results.find((r) => !r.success);
         console.error(
-          `[worker] Campaign ${campaignId}: ${batchFailed} failed in this batch. Reason: ${firstError?.error}`
+          `[worker] Campaign ${campaignId}: ${batchFailed} failed. Reason: ${firstError?.error}`
         );
       }
 
@@ -90,11 +70,10 @@ export async function processCampaign(campaignId: number): Promise<void> {
         data: { sentCount, failedCount },
       });
 
-      cursor = batch[batch.length - 1].id;
-
-      if (batch.length < BATCH_SIZE) break; // last batch
-
-      await sleep(BATCH_DELAY_MS);
+      // Delay between batches unless this was the last one
+      if (i + BATCH_SIZE < emails.length) {
+        await sleep(BATCH_DELAY_MS);
+      }
     }
 
     await prisma.campaign.update({
@@ -111,5 +90,7 @@ export async function processCampaign(campaignId: number): Promise<void> {
       where: { id: campaignId },
       data: { status: 'failed' },
     });
+  } finally {
+    clearEmails(campaignId);
   }
 }
