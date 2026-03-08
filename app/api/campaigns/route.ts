@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { waitUntil } from '@vercel/functions';
 import { prisma } from '@/lib/prisma';
 import { parseEmailsFromCSV } from '@/lib/csv-parser';
 import { storeEmails } from '@/lib/email-store';
@@ -58,10 +59,13 @@ export async function POST(req: NextRequest) {
     // Store emails in memory — not in the database
     storeEmails(campaign.id, emails);
 
-    // Fire-and-forget background processing
-    processCampaign(campaign.id).catch((err) => {
-      console.error('[campaign worker error]', err);
-    });
+    // waitUntil keeps the Vercel serverless function alive until the
+    // campaign finishes sending, instead of killing it after the response.
+    waitUntil(
+      processCampaign(campaign.id).catch((err) => {
+        console.error('[campaign worker error]', err);
+      })
+    );
 
     return NextResponse.json(campaign, { status: 201 });
   } catch (err) {
