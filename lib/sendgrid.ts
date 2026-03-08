@@ -1,6 +1,6 @@
 import sgMail from '@sendgrid/mail';
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
+sgMail.setApiKey((process.env.SENDGRID_API_KEY ?? '').trim());
 
 const SENDER_EMAIL = process.env.SENDER_EMAIL!;
 const SENDER_NAME = process.env.SENDER_NAME || 'Newsletter';
