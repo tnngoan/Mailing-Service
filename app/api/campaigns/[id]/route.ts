@@ -1,20 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { prisma, ensureSchema } from '@/lib/prisma';
 
 // GET /api/campaigns/:id — poll campaign status
 export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const id = parseInt(params.id, 10);
-  if (isNaN(id)) {
-    return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
-  }
+  try {
+    await ensureSchema();
 
-  const campaign = await prisma.campaign.findUnique({ where: { id } });
-  if (!campaign) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  }
+    const id = parseInt(params.id, 10);
+    if (isNaN(id)) {
+      return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+    }
 
-  return NextResponse.json(campaign);
+    const campaign = await prisma.campaign.findUnique({ where: { id } });
+    if (!campaign) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(campaign);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[GET /api/campaigns/[id]]', message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

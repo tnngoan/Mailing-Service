@@ -1,23 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
-import { prisma } from '@/lib/prisma';
+import { prisma, ensureSchema } from '@/lib/prisma';
 import { parseEmailsFromCSV } from '@/lib/csv-parser';
 import { storeEmails } from '@/lib/email-store';
 import { processCampaign } from '@/lib/worker';
 
 // GET /api/campaigns — list recent campaigns
 export async function GET() {
-  const campaigns = await prisma.campaign.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: 20,
-  });
-  return NextResponse.json(campaigns);
+  try {
+    await ensureSchema();
+    const campaigns = await prisma.campaign.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    return NextResponse.json(campaigns);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[GET /api/campaigns]', message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 // POST /api/campaigns — accepts multipart/form-data: subject + content + CSV file
 // Emails are parsed from the uploaded CSV and held in memory only — never stored in the DB.
 export async function POST(req: NextRequest) {
   try {
+    await ensureSchema();
+
     const formData = await req.formData();
     const subject = (formData.get('subject') as string | null)?.trim();
     const content = (formData.get('content') as string | null)?.trim();
@@ -69,7 +78,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(campaign, { status: 201 });
   } catch (err) {
-    console.error('[POST /api/campaigns]', err);
-    return NextResponse.json({ error: 'Failed to create campaign' }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[POST /api/campaigns]', message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
