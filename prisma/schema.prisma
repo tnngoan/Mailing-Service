@@ -15,6 +15,7 @@ model Campaign {
   totalRecipients Int      @default(0)
   sentCount       Int      @default(0)
   failedCount     Int      @default(0)
+  errorMessage    String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }

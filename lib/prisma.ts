@@ -28,6 +28,7 @@ export async function ensureSchema(): Promise<void> {
         "totalRecipients" INTEGER  NOT NULL DEFAULT 0,
         "sentCount"       INTEGER  NOT NULL DEFAULT 0,
         "failedCount"     INTEGER  NOT NULL DEFAULT 0,
+        "errorMessage"    TEXT,
         "createdAt"       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updatedAt"       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
       )

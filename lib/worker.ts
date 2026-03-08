@@ -42,6 +42,7 @@ export async function processCampaign(campaignId: number): Promise<void> {
 
     let sentCount = 0;
     let failedCount = 0;
+    let firstErrorMessage: string | undefined;
 
     for (let i = 0; i < emails.length; i += BATCH_SIZE) {
       const batch = emails.slice(i, i + BATCH_SIZE);
@@ -57,6 +58,7 @@ export async function processCampaign(campaignId: number): Promise<void> {
 
       if (batchFailed > 0) {
         const firstError = results.find((r) => !r.success);
+        if (!firstErrorMessage) firstErrorMessage = firstError?.error;
         console.error(
           `[worker] Campaign ${campaignId}: ${batchFailed} failed. Reason: ${firstError?.error}`
         );
@@ -76,13 +78,21 @@ export async function processCampaign(campaignId: number): Promise<void> {
       }
     }
 
+    // Mark as failed when nothing was delivered, completed otherwise
+    const finalStatus = sentCount === 0 && failedCount > 0 ? 'failed' : 'completed';
+
     await prisma.campaign.update({
       where: { id: campaignId },
-      data: { status: 'completed', sentCount, failedCount },
+      data: {
+        status: finalStatus,
+        sentCount,
+        failedCount,
+        ...(firstErrorMessage ? { errorMessage: firstErrorMessage } : {}),
+      },
     });
 
     console.log(
-      `[worker] Campaign ${campaignId} completed. Sent: ${sentCount}, Failed: ${failedCount}`
+      `[worker] Campaign ${campaignId} ${finalStatus}. Sent: ${sentCount}, Failed: ${failedCount}${firstErrorMessage ? ` — ${firstErrorMessage}` : ''}`
     );
   } catch (err) {
     console.error(`[worker] Campaign ${campaignId} failed:`, err);

@@ -10,6 +10,7 @@ interface Campaign {
   totalRecipients: number;
   sentCount: number;
   failedCount: number;
+  errorMessage?: string | null;
   createdAt: string;
 }
 

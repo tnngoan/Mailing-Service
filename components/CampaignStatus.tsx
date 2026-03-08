@@ -9,6 +9,7 @@ interface Campaign {
   totalRecipients: number;
   sentCount: number;
   failedCount: number;
+  errorMessage?: string | null;
   createdAt: string;
 }
 
@@ -18,12 +19,15 @@ interface Props {
   onUpdate: (campaigns: Campaign[]) => void;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  queued: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  sending: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  completed: 'bg-green-500/20 text-green-400 border-green-500/30',
-  failed: 'bg-red-500/20 text-red-400 border-red-500/30',
-};
+function statusColor(c: Campaign): string {
+  if (c.status === 'failed') return 'bg-red-500/20 text-red-400 border-red-500/30';
+  if (c.status === 'sending') return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+  if (c.status === 'queued') return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+  // completed — amber if any failed, green if all sent
+  if (c.status === 'completed' && c.failedCount > 0)
+    return 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+  return 'bg-green-500/20 text-green-400 border-green-500/30';
+}
 
 export default function CampaignStatus({ campaigns, activeCampaignId, onUpdate }: Props) {
   const [polling, setPolling] = useState(false);
@@ -66,9 +70,10 @@ export default function CampaignStatus({ campaigns, activeCampaignId, onUpdate }
       </h2>
       <div className="space-y-2">
         {campaigns.map((c) => {
-          const pct = c.totalRecipients > 0
-            ? Math.round((c.sentCount / c.totalRecipients) * 100)
-            : 0;
+          const pct =
+            c.totalRecipients > 0
+              ? Math.round((c.sentCount / c.totalRecipients) * 100)
+              : 0;
 
           return (
             <div
@@ -83,7 +88,7 @@ export default function CampaignStatus({ campaigns, activeCampaignId, onUpdate }
                   </p>
                 </div>
                 <span
-                  className={`shrink-0 text-xs font-medium px-2 py-1 rounded-full border ${STATUS_COLORS[c.status] ?? 'bg-zinc-700 text-zinc-300'}`}
+                  className={`shrink-0 text-xs font-medium px-2 py-1 rounded-full border ${statusColor(c)}`}
                 >
                   {c.status}
                 </span>
@@ -106,6 +111,14 @@ export default function CampaignStatus({ campaigns, activeCampaignId, onUpdate }
                       style={{ width: `${pct}%` }}
                     />
                   </div>
+                </div>
+              )}
+
+              {/* Surface the exact SendGrid error so it's visible without checking logs */}
+              {c.errorMessage && (
+                <div className="flex items-start gap-2 bg-red-950/40 border border-red-900/50 rounded-md px-3 py-2">
+                  <span className="text-red-400 mt-0.5 shrink-0">⚠</span>
+                  <p className="text-xs text-red-300 break-words">{c.errorMessage}</p>
                 </div>
               )}
             </div>
