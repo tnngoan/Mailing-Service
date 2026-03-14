@@ -28,15 +28,21 @@ function countEmailsInCSV(text: string): number {
   return count;
 }
 
+interface ProviderInfo {
+  name: string;
+  dailyLimit: number;
+}
+
 export default function Dashboard() {
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvCount, setCsvCount] = useState<number | null>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [activeCampaignId, setActiveCampaignId] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [totalDailyLimit, setTotalDailyLimit] = useState<number>(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -45,10 +51,24 @@ export default function Dashboard() {
     setTimeout(() => setToast(null), 6000);
   }
 
-  useEffect(() => {
+  function refreshCampaigns() {
     fetch('/api/campaigns')
       .then((r) => r.json())
-      .then((data) => setCampaigns(data))
+      .then((data) => {
+        if (Array.isArray(data)) setCampaigns(data);
+      })
+      .catch(() => {});
+  }
+
+  useEffect(() => {
+    refreshCampaigns();
+
+    fetch('/api/providers')
+      .then((r) => r.json())
+      .then((data) => {
+        setProviders(data.providers ?? []);
+        setTotalDailyLimit(data.totalDailyLimit ?? 0);
+      })
       .catch(() => {});
   }, []);
 
@@ -92,15 +112,26 @@ export default function Dashboard() {
       const data = await res.json();
 
       if (!res.ok) {
-        showToast(data.error ?? 'Failed to start campaign.', 'error');
+        showToast(data.error ?? 'Failed to create campaign.', 'error');
       } else {
-        showToast(
-          `Campaign started — sending to ${data.totalRecipients.toLocaleString()} recipients.`,
-          'success'
-        );
-        setActiveCampaignId(data.id);
-        setCampaigns((prev) => [data, ...prev]);
-        // Reset form for the next campaign
+        const daysNeeded = data.daysNeeded ?? 1;
+        const totalRecipients = data.totalRecipients ?? 0;
+
+        if (daysNeeded > 1) {
+          showToast(
+            `Campaign created with ${totalRecipients.toLocaleString()} recipients. Will need ~${daysNeeded} daily batches (${data.dailyLimit}/day). Click "Send Today's Batch" to start.`,
+            'success'
+          );
+        } else {
+          showToast(
+            `Campaign created with ${totalRecipients.toLocaleString()} recipients. Click "Send Today's Batch" to start sending.`,
+            'success'
+          );
+        }
+
+        refreshCampaigns();
+
+        // Reset form
         setSubject('');
         setContent('');
         setCsvFile(null);
@@ -122,9 +153,29 @@ export default function Dashboard() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-zinc-100">Bulk Email Sender</h1>
         <p className="text-zinc-500 mt-1 text-sm">
-          Upload a CSV, write your message, send. Nothing is stored.
+          Upload a CSV, write your message, then send daily batches across multiple providers.
         </p>
       </div>
+
+      {/* Provider capacity banner */}
+      {providers.length > 0 && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs text-zinc-400 flex-wrap">
+            <span className="text-zinc-500">Providers:</span>
+            {providers.map((p) => (
+              <span
+                key={p.name}
+                className="bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-zinc-300"
+              >
+                {p.name} <span className="text-zinc-500">{p.dailyLimit}/day</span>
+              </span>
+            ))}
+          </div>
+          <span className="text-xs text-emerald-400 font-medium whitespace-nowrap ml-2">
+            {totalDailyLimit.toLocaleString()}/day total
+          </span>
+        </div>
+      )}
 
       {/* Compose + Send */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 mb-6 space-y-5">
@@ -151,16 +202,23 @@ export default function Dashboard() {
               </svg>
               <span className="text-sm text-zinc-200 truncate flex-1">{csvFile.name}</span>
               {csvCount !== null && (
-                <span className="text-xs text-emerald-400 shrink-0 font-medium">
-                  {csvCount.toLocaleString()} recipients
-                </span>
+                <>
+                  <span className="text-xs text-emerald-400 shrink-0 font-medium">
+                    {csvCount.toLocaleString()} recipients
+                  </span>
+                  {totalDailyLimit > 0 && csvCount > totalDailyLimit && (
+                    <span className="text-xs text-zinc-500 shrink-0">
+                      (~{Math.ceil(csvCount / totalDailyLimit)} days)
+                    </span>
+                  )}
+                </>
               )}
               <button
                 onClick={handleClearFile}
                 className="text-zinc-500 hover:text-zinc-300 transition-colors shrink-0 ml-1"
                 title="Remove file"
               >
-                ×
+                x
               </button>
             </div>
           ) : (
@@ -194,7 +252,7 @@ export default function Dashboard() {
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="Write your email content here…"
+            placeholder="Write your email content here..."
             rows={12}
             className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
           />
@@ -206,18 +264,18 @@ export default function Dashboard() {
           className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-lg transition-colors text-sm"
         >
           {sending
-            ? 'Starting campaign…'
+            ? 'Creating campaign...'
             : csvCount
-            ? `Send to ${csvCount.toLocaleString()} recipients`
-            : 'Send Email Campaign'}
+            ? `Create Campaign (${csvCount.toLocaleString()} recipients)`
+            : 'Create Campaign'}
         </button>
       </div>
 
       {/* Campaign history */}
       <CampaignStatus
         campaigns={campaigns}
-        activeCampaignId={activeCampaignId}
         onUpdate={setCampaigns}
+        onToast={showToast}
       />
 
       {/* Toast */}

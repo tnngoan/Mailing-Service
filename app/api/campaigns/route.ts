@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { waitUntil } from '@vercel/functions';
-import { prisma, ensureSchema } from '@/lib/prisma';
+import { prisma } from '@/lib/prisma';
 import { parseEmailsFromCSV } from '@/lib/csv-parser';
-import { storeEmails } from '@/lib/email-store';
-import { processCampaign } from '@/lib/worker';
+import { getTotalDailyLimit, getProviders } from '@/lib/providers';
 
-// GET /api/campaigns — list recent campaigns
+// GET /api/campaigns — list recent campaigns with recipient stats
 export async function GET() {
   try {
-    await ensureSchema();
     const campaigns = await prisma.campaign.findMany({
       orderBy: { createdAt: 'desc' },
-      take: 20,
+      take: 50,
     });
     return NextResponse.json(campaigns);
   } catch (err) {
@@ -21,11 +18,17 @@ export async function GET() {
   }
 }
 
-// POST /api/campaigns — accepts multipart/form-data: subject + content + CSV file
-// Emails are parsed from the uploaded CSV and held in memory only — never stored in the DB.
+// POST /api/campaigns — upload CSV + create campaign with recipients stored in DB.
+// Does NOT start sending — user triggers daily batches via POST /api/campaigns/[id]/send-batch.
 export async function POST(req: NextRequest) {
   try {
-    await ensureSchema();
+    const providers = getProviders();
+    if (providers.length === 0) {
+      return NextResponse.json(
+        { error: 'No email providers configured. Set at least one API key.' },
+        { status: 500 }
+      );
+    }
 
     const formData = await req.formData();
     const subject = (formData.get('subject') as string | null)?.trim();
@@ -56,27 +59,41 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Create campaign
     const campaign = await prisma.campaign.create({
       data: {
         subject,
         content,
-        status: 'queued',
+        status: 'pending',
         totalRecipients: emails.length,
       },
     });
 
-    // Store emails in memory — not in the database
-    storeEmails(campaign.id, emails);
+    // Bulk-insert recipients in chunks of 1000
+    const CHUNK_SIZE = 1000;
+    for (let i = 0; i < emails.length; i += CHUNK_SIZE) {
+      const chunk = emails.slice(i, i + CHUNK_SIZE);
+      await prisma.recipient.createMany({
+        data: chunk.map((email) => ({
+          campaignId: campaign.id,
+          email,
+          status: 'pending',
+        })),
+      });
+    }
 
-    // waitUntil keeps the Vercel serverless function alive until the
-    // campaign finishes sending, instead of killing it after the response.
-    waitUntil(
-      processCampaign(campaign.id).catch((err) => {
-        console.error('[campaign worker error]', err);
-      })
+    const dailyLimit = getTotalDailyLimit();
+    const daysNeeded = Math.ceil(emails.length / dailyLimit);
+
+    return NextResponse.json(
+      {
+        ...campaign,
+        dailyLimit,
+        daysNeeded,
+        providerCount: providers.length,
+      },
+      { status: 201 }
     );
-
-    return NextResponse.json(campaign, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[POST /api/campaigns]', message);

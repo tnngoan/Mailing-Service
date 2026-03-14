@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
@@ -8,14 +9,30 @@ datasource db {
 }
 
 model Campaign {
-  id              Int      @id @default(autoincrement())
+  id              Int         @id @default(autoincrement())
   subject         String
   content         String
-  status          String   @default("queued") // queued | sending | completed | failed
-  totalRecipients Int      @default(0)
-  sentCount       Int      @default(0)
-  failedCount     Int      @default(0)
+  status          String      @default("pending") // pending | sending | paused | completed | failed
+  totalRecipients Int         @default(0)
+  sentCount       Int         @default(0)
+  failedCount     Int         @default(0)
   errorMessage    String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  recipients      Recipient[]
+}
+
+model Recipient {
+  id         Int       @id @default(autoincrement())
+  campaignId Int
+  email      String
+  status     String    @default("pending") // pending | sent | failed
+  provider   String?
+  sentAt     DateTime?
+  error      String?
+  batchDay   Int?
+  campaign   Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, status])
+  @@index([campaignId, batchDay])
 }
