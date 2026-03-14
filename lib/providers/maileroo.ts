@@ -15,6 +15,7 @@ export function createMailerooProvider(): EmailProvider | null {
 
   return {
     name: 'maileroo',
+    tier: 'untested',
     dailyLimit,
     batchSize: 50,
     async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {

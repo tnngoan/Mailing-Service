@@ -15,6 +15,7 @@ export function createSmtp2goProvider(): EmailProvider | null {
 
   return {
     name: 'smtp2go',
+    tier: 'untested',
     dailyLimit,
     batchSize: 50,
     async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {

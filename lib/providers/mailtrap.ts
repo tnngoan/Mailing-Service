@@ -18,6 +18,7 @@ export function createMailtrapProvider(): EmailProvider | null {
 
   return {
     name: 'mailtrap',
+    tier: 'unreliable',
     dailyLimit,
     batchSize: 50, // send in reasonable chunks; each call supports multiple "to" addresses
     async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {

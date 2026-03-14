@@ -13,11 +13,19 @@ interface Campaign {
   createdAt: string;
 }
 
+interface ProviderReport {
+  provider: string;
+  sent: number;
+  failed: number;
+  errors: string[];
+}
+
 interface CampaignDetail extends Campaign {
   pendingCount: number;
   dailyLimit: number;
   daysRemaining: number;
   batchHistory: { day: number; sent: number; failed: number }[];
+  providerReport: ProviderReport[];
 }
 
 interface Props {
@@ -283,6 +291,35 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
                       <p className="text-[10px] text-zinc-500 uppercase">days left</p>
                     </div>
                   </div>
+
+                  {/* Provider report */}
+                  {detail.providerReport && detail.providerReport.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-zinc-500 font-medium">Provider report</p>
+                      {detail.providerReport.map((p) => (
+                        <div key={p.provider} className="bg-zinc-800/50 rounded px-3 py-2 space-y-1">
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-zinc-300 font-medium w-20">{p.provider}</span>
+                            {p.sent > 0 && <span className="text-green-400">{p.sent.toLocaleString()} sent</span>}
+                            {p.failed > 0 && <span className="text-red-400">{p.failed.toLocaleString()} failed</span>}
+                            {p.sent > 0 && p.failed === 0 && (
+                              <span className="text-green-500 ml-auto text-[10px]">PROVEN</span>
+                            )}
+                            {p.failed > 0 && p.sent === 0 && (
+                              <span className="text-red-500 ml-auto text-[10px]">FAILED</span>
+                            )}
+                          </div>
+                          {p.errors.length > 0 && (
+                            <div className="pl-[88px]">
+                              {p.errors.map((err, i) => (
+                                <p key={i} className="text-[10px] text-red-400/80">Reason: {err}</p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Batch history */}
                   {detail.batchHistory.length > 0 && (

@@ -14,6 +14,7 @@ export function createResendProvider(): EmailProvider | null {
 
   return {
     name: 'resend',
+    tier: 'untested',
     dailyLimit,
     batchSize: 50, // Resend batch endpoint supports up to 100
     async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {

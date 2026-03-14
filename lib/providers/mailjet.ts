@@ -15,6 +15,7 @@ export function createMailjetProvider(): EmailProvider | null {
 
   return {
     name: 'mailjet',
+    tier: 'proven',
     dailyLimit,
     batchSize: 50, // Mailjet allows up to 50 recipients per message
     async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {

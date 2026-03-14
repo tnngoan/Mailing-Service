@@ -38,12 +38,12 @@ export function getProviders(): EmailProvider[] {
     createResendProvider,      // 100/day
   ];
 
+  const tierOrder = { proven: 0, untested: 1, unreliable: 2 };
   const providers = factories
     .map((fn) => fn())
     .filter((p): p is EmailProvider => p !== null)
-    // Sort by batch size descending — fastest providers (fewest API calls) go first
-    // to maximize emails sent before Vercel function timeout
-    .sort((a, b) => b.batchSize - a.batchSize || b.dailyLimit - a.dailyLimit);
+    // Proven first, then untested, then unreliable. Within same tier, fastest (biggest batch) first.
+    .sort((a, b) => tierOrder[a.tier] - tierOrder[b.tier] || b.batchSize - a.batchSize || b.dailyLimit - a.dailyLimit);
 
   if (providers.length === 0) {
     console.error('[providers] No email providers configured — set at least one API key');

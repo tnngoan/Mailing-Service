@@ -49,6 +49,7 @@ export function createSendPulseProvider(): EmailProvider | null {
 
   return {
     name: 'sendpulse',
+    tier: 'unreliable',
     dailyLimit,
     batchSize: 50, // stay within the 50/hour rate limit per batch
     async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {

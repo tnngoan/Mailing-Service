@@ -46,6 +46,47 @@ export async function GET(
       days.set(row.batchDay, day);
     }
 
+    // Per-provider breakdown with failure reasons
+    const providerStats = await prisma.recipient.groupBy({
+      by: ['provider', 'status'],
+      where: { campaignId: id, provider: { not: null } },
+      _count: true,
+    });
+
+    const providerMap = new Map<string, { sent: number; failed: number }>();
+    for (const row of providerStats) {
+      if (!row.provider) continue;
+      const entry = providerMap.get(row.provider) ?? { sent: 0, failed: 0 };
+      if (row.status === 'sent') entry.sent = row._count;
+      if (row.status === 'failed') entry.failed = row._count;
+      providerMap.set(row.provider, entry);
+    }
+
+    // Get distinct error messages per failed provider
+    const failedProviderErrors = failedCount > 0
+      ? await prisma.recipient.groupBy({
+          by: ['provider', 'error'],
+          where: { campaignId: id, status: 'failed', provider: { not: null } },
+          _count: true,
+        })
+      : [];
+
+    const errorsByProvider = new Map<string, string[]>();
+    for (const row of failedProviderErrors) {
+      if (!row.provider || !row.error) continue;
+      const list = errorsByProvider.get(row.provider) ?? [];
+      list.push(`${row.error} (${row._count})`);
+      errorsByProvider.set(row.provider, list);
+    }
+
+    const providerReport = Array.from(providerMap.entries())
+      .map(([provider, counts]) => ({
+        provider,
+        ...counts,
+        errors: errorsByProvider.get(provider) ?? [],
+      }))
+      .sort((a, b) => b.sent - a.sent || a.failed - b.failed);
+
     const dailyLimit = getTotalDailyLimit();
     const daysRemaining = dailyLimit > 0 ? Math.ceil(pendingCount / dailyLimit) : 0;
 
@@ -59,6 +100,7 @@ export async function GET(
       batchHistory: Array.from(days.entries())
         .sort(([a], [b]) => a - b)
         .map(([day, counts]) => ({ day, ...counts })),
+      providerReport,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

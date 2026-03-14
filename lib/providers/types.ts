@@ -10,6 +10,8 @@ export interface SendResult {
   provider: string;
 }
 
+export type ProviderTier = 'proven' | 'untested' | 'unreliable';
+
 export interface EmailProvider {
   /** Short identifier shown in logs and UI (e.g. "sendgrid", "brevo") */
   name: string;
@@ -17,6 +19,8 @@ export interface EmailProvider {
   dailyLimit: number;
   /** Maximum recipients per single API call */
   batchSize: number;
+  /** Reliability tier: proven > untested > unreliable */
+  tier: ProviderTier;
   /** Send a batch of emails; returns one result per recipient */
   sendBatch(
     emails: string[],

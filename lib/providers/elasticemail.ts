@@ -15,6 +15,7 @@ export function createElasticEmailProvider(): EmailProvider | null {
 
   return {
     name: 'elasticemail',
+    tier: 'untested',
     dailyLimit,
     batchSize: 50,
     async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {

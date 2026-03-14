@@ -32,6 +32,7 @@ export function createBrevoProvider(): EmailProvider | null {
 
     return {
       name: 'brevo',
+      tier: 'unreliable',
       dailyLimit,
       batchSize: 10,
       async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {
@@ -59,6 +60,7 @@ export function createBrevoProvider(): EmailProvider | null {
   // REST API key path
   return {
     name: 'brevo',
+    tier: 'unreliable',
     dailyLimit,
     batchSize: 50,
     async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {

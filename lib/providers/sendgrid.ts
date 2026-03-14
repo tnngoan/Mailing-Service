@@ -11,6 +11,7 @@ export function createSendGridProvider(): EmailProvider | null {
 
   return {
     name: 'sendgrid',
+    tier: 'proven',
     dailyLimit,
     batchSize: 500, // well under SendGrid's 1000 personalizations limit
     async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {
