@@ -21,11 +21,8 @@ import { createResendProvider } from './resend';           // 100/day free
 
 export type { EmailProvider, SendResult } from './types';
 
-let cachedProviders: EmailProvider[] | null = null;
-
 /** Returns all providers that have valid API keys configured, sorted by daily limit desc. */
 export function getProviders(): EmailProvider[] {
-  if (cachedProviders) return cachedProviders;
 
   // Ordered by free-tier daily limit (highest first)
   const factories = [
@@ -41,21 +38,21 @@ export function getProviders(): EmailProvider[] {
     createResendProvider,      // 100/day
   ];
 
-  cachedProviders = factories
+  const providers = factories
     .map((fn) => fn())
     .filter((p): p is EmailProvider => p !== null)
     // Sort by daily limit descending so biggest providers get most emails
     .sort((a, b) => b.dailyLimit - a.dailyLimit);
 
-  if (cachedProviders.length === 0) {
+  if (providers.length === 0) {
     console.error('[providers] No email providers configured — set at least one API key');
   } else {
     console.log(
-      `[providers] Active (${cachedProviders.length}): ${cachedProviders.map((p) => `${p.name} (${p.dailyLimit}/day)`).join(', ')}`
+      `[providers] Active (${providers.length}): ${providers.map((p) => `${p.name} (${p.dailyLimit}/day)`).join(', ')}`
     );
   }
 
-  return cachedProviders;
+  return providers;
 }
 
 /** Total daily sending capacity across all configured providers. */

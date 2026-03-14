@@ -4,131 +4,129 @@ jest.mock('../lib/prisma', () => ({
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    recipient: {
+      findMany: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+      count: jest.fn(),
+      groupBy: jest.fn(),
+    },
   },
 }));
 
 jest.mock('../lib/sendgrid', () => ({
-  sendBatch: jest.fn(),
+  buildHtmlEmail: jest.fn(() => '<html>test</html>'),
 }));
 
-jest.mock('../lib/email-store', () => ({
-  getEmails: jest.fn(),
-  clearEmails: jest.fn(),
+jest.mock('../lib/providers', () => ({
+  getProviders: jest.fn(() => [
+    {
+      name: 'test-provider',
+      dailyLimit: 100,
+      batchSize: 50,
+      sendBatch: jest.fn(),
+    },
+  ]),
 }));
 
 import { prisma } from '../lib/prisma';
-import { sendBatch } from '../lib/sendgrid';
-import { getEmails, clearEmails } from '../lib/email-store';
-import { processCampaign } from '../lib/worker';
+import { getProviders } from '../lib/providers';
+import { processBatch } from '../lib/worker';
 
 const mockFindUnique = prisma.campaign.findUnique as jest.Mock;
-const mockUpdate = prisma.campaign.update as jest.Mock;
-const mockSendBatch = sendBatch as jest.Mock;
-const mockGetEmails = getEmails as jest.Mock;
-const mockClearEmails = clearEmails as jest.Mock;
+const mockCampaignUpdate = prisma.campaign.update as jest.Mock;
+const mockRecipientFindMany = prisma.recipient.findMany as jest.Mock;
+const mockRecipientUpdate = prisma.recipient.update as jest.Mock;
+const mockRecipientCount = prisma.recipient.count as jest.Mock;
+const mockRecipientGroupBy = prisma.recipient.groupBy as jest.Mock;
 
 const FAKE_CAMPAIGN = {
   id: 1,
   subject: 'Test',
   content: 'Hello',
-  status: 'queued',
-  totalRecipients: 0,
+  status: 'sending',
+  totalRecipients: 3,
   sentCount: 0,
   failedCount: 0,
 };
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockUpdate.mockResolvedValue({});
+  mockCampaignUpdate.mockResolvedValue({});
+  mockRecipientUpdate.mockResolvedValue({});
 });
 
-describe('processCampaign', () => {
-  test('marks campaign failed when no emails in store', async () => {
-    mockFindUnique.mockResolvedValue(FAKE_CAMPAIGN);
-    mockGetEmails.mockReturnValue([]);
-
-    await processCampaign(1);
-
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: 'failed' }) })
-    );
-    expect(mockSendBatch).not.toHaveBeenCalled();
-    expect(mockClearEmails).toHaveBeenCalledWith(1);
-  });
-
-  test('marks campaign failed when campaign not found', async () => {
+describe('processBatch', () => {
+  test('does nothing when campaign not found', async () => {
     mockFindUnique.mockResolvedValue(null);
 
-    await processCampaign(99);
+    await processBatch(99, 1);
 
-    expect(mockUpdate).not.toHaveBeenCalled();
-    expect(mockSendBatch).not.toHaveBeenCalled();
+    expect(mockCampaignUpdate).not.toHaveBeenCalled();
   });
 
-  test('sends all emails and marks campaign completed', async () => {
-    const emails = ['a@example.com', 'b@example.com', 'c@example.com'];
+  test('does nothing when no pending recipients', async () => {
     mockFindUnique.mockResolvedValue(FAKE_CAMPAIGN);
-    mockGetEmails.mockReturnValue(emails);
-    mockSendBatch.mockResolvedValue(
-      emails.map((email) => ({ success: true, email }))
-    );
+    mockRecipientFindMany.mockResolvedValue([]);
 
-    await processCampaign(1);
+    await processBatch(1, 1);
 
-    expect(mockSendBatch).toHaveBeenCalledTimes(1);
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ status: 'completed', sentCount: 3, failedCount: 0 }),
-      })
-    );
-    expect(mockClearEmails).toHaveBeenCalledWith(1);
+    expect(mockCampaignUpdate).not.toHaveBeenCalled();
   });
 
-  test('tracks failed sends in failedCount', async () => {
-    const emails = ['a@example.com', 'b@example.com'];
+  test('sends emails and updates recipient statuses', async () => {
+    const recipients = [
+      { id: 1, email: 'a@example.com', provider: 'test-provider', status: 'pending' },
+      { id: 2, email: 'b@example.com', provider: 'test-provider', status: 'pending' },
+    ];
+
     mockFindUnique.mockResolvedValue(FAKE_CAMPAIGN);
-    mockGetEmails.mockReturnValue(emails);
-    mockSendBatch.mockResolvedValue([
-      { success: true, email: 'a@example.com' },
-      { success: false, email: 'b@example.com', error: 'rejected' },
+    mockRecipientFindMany.mockResolvedValue(recipients);
+    mockRecipientGroupBy.mockResolvedValue([
+      { status: 'sent', _count: 2 },
+    ]);
+    mockRecipientCount.mockResolvedValue(0); // no pending left
+
+    const providers = (getProviders as jest.Mock)();
+    providers[0].sendBatch.mockResolvedValue([
+      { success: true, email: 'a@example.com', provider: 'test-provider' },
+      { success: true, email: 'b@example.com', provider: 'test-provider' },
     ]);
 
-    await processCampaign(1);
+    await processBatch(1, 1);
 
-    expect(mockUpdate).toHaveBeenCalledWith(
+    expect(providers[0].sendBatch).toHaveBeenCalledTimes(1);
+    expect(mockRecipientUpdate).toHaveBeenCalledTimes(2);
+    expect(mockCampaignUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ status: 'completed', sentCount: 1, failedCount: 1 }),
+        data: expect.objectContaining({ status: 'completed' }),
       })
     );
   });
 
-  test('splits emails into batches of 500', async () => {
-    const emails = Array.from({ length: 1100 }, (_, i) => `user${i}@example.com`);
+  test('sets campaign to paused when pending remain', async () => {
+    const recipients = [
+      { id: 1, email: 'a@example.com', provider: 'test-provider', status: 'pending' },
+    ];
+
     mockFindUnique.mockResolvedValue(FAKE_CAMPAIGN);
-    mockGetEmails.mockReturnValue(emails);
-    mockSendBatch.mockResolvedValue(
-      emails.slice(0, 500).map((email) => ({ success: true, email }))
+    mockRecipientFindMany.mockResolvedValue(recipients);
+    mockRecipientGroupBy.mockResolvedValue([
+      { status: 'sent', _count: 1 },
+    ]);
+    mockRecipientCount.mockResolvedValue(5); // 5 still pending
+
+    const providers = (getProviders as jest.Mock)();
+    providers[0].sendBatch.mockResolvedValue([
+      { success: true, email: 'a@example.com', provider: 'test-provider' },
+    ]);
+
+    await processBatch(1, 1);
+
+    expect(mockCampaignUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'paused' }),
+      })
     );
-
-    await processCampaign(1);
-
-    // 1100 emails → 3 batches: 500, 500, 100
-    expect(mockSendBatch).toHaveBeenCalledTimes(3);
-    expect(mockSendBatch.mock.calls[0][0]).toHaveLength(500);
-    expect(mockSendBatch.mock.calls[1][0]).toHaveLength(500);
-    expect(mockSendBatch.mock.calls[2][0]).toHaveLength(100);
-  });
-
-  test('marks campaign failed and clears store on unexpected error', async () => {
-    mockFindUnique.mockResolvedValue(FAKE_CAMPAIGN);
-    mockGetEmails.mockReturnValue(['a@example.com']);
-    mockSendBatch.mockRejectedValue(new Error('Unexpected crash'));
-
-    await processCampaign(1);
-
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: 'failed' }) })
-    );
-    expect(mockClearEmails).toHaveBeenCalledWith(1);
   });
 });

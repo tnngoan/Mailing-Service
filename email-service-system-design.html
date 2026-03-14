@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Email Sending Service — System Design Document</title>
+<style>
+  :root {
+    --primary: #1a56db;
+    --primary-light: #e8f0fe;
+    --accent: #059669;
+    --accent-light: #ecfdf5;
+    --warning: #d97706;
+    --warning-light: #fffbeb;
+    --danger: #dc2626;
+    --danger-light: #fef2f2;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--gray-800);
+    line-height: 1.7;
+    background: var(--gray-50);
+    padding: 0;
+  }
+  .hero {
+    background: linear-gradient(135deg, #1e3a5f 0%, #1a56db 50%, #3b82f6 100%);
+    color: white;
+    padding: 60px 40px;
+    text-align: center;
+  }
+  .hero h1 { font-size: 2.4em; font-weight: 700; margin-bottom: 12px; }
+  .hero p { font-size: 1.15em; opacity: 0.9; max-width: 700px; margin: 0 auto; }
+  .hero .meta {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+    gap: 30px;
+    font-size: 0.9em;
+    opacity: 0.8;
+  }
+  .container { max-width: 1100px; margin: 0 auto; padding: 40px 30px; }
+
+  /* Table of Contents */
+  .toc {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    padding: 30px;
+    margin-bottom: 40px;
+  }
+  .toc h2 { font-size: 1.3em; margin-bottom: 16px; color: var(--primary); }
+  .toc ol { padding-left: 24px; }
+  .toc li { margin-bottom: 8px; }
+  .toc a { color: var(--primary); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+
+  /* Sections */
+  .section {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    padding: 36px;
+    margin-bottom: 30px;
+  }
+  .section h2 {
+    font-size: 1.5em;
+    color: var(--gray-900);
+    border-bottom: 3px solid var(--primary);
+    padding-bottom: 10px;
+    margin-bottom: 24px;
+  }
+  .section h3 {
+    font-size: 1.15em;
+    color: var(--gray-800);
+    margin: 24px 0 12px 0;
+  }
+  .section p { margin-bottom: 14px; color: var(--gray-700); }
+
+  /* Info boxes */
+  .box {
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin: 18px 0;
+  }
+  .box-info { background: var(--primary-light); border-left: 4px solid var(--primary); }
+  .box-success { background: var(--accent-light); border-left: 4px solid var(--accent); }
+  .box-warning { background: var(--warning-light); border-left: 4px solid var(--warning); }
+  .box-danger { background: var(--danger-light); border-left: 4px solid var(--danger); }
+  .box strong { display: block; margin-bottom: 6px; }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 18px 0;
+    font-size: 0.95em;
+  }
+  th, td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--gray-200);
+  }
+  th {
+    background: var(--gray-100);
+    font-weight: 600;
+    color: var(--gray-800);
+  }
+  tr:hover { background: var(--gray-50); }
+  .cost-table th { background: var(--primary); color: white; }
+  .cost-table .total td { font-weight: 700; background: var(--primary-light); border-top: 2px solid var(--primary); }
+
+  /* Architecture diagram */
+  .arch-diagram {
+    background: var(--gray-900);
+    color: #e2e8f0;
+    font-family: 'Courier New', monospace;
+    padding: 30px;
+    border-radius: 10px;
+    overflow-x: auto;
+    font-size: 0.82em;
+    line-height: 1.5;
+    white-space: pre;
+    margin: 20px 0;
+  }
+
+  /* Flow steps */
+  .flow-steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+  }
+  .flow-step {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+  }
+  .flow-step .step-num {
+    display: inline-block;
+    background: var(--primary);
+    color: white;
+    width: 32px;
+    height: 32px;
+    line-height: 32px;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 0.9em;
+    margin-bottom: 10px;
+  }
+  .flow-step h4 { font-size: 1em; margin-bottom: 6px; }
+  .flow-step p { font-size: 0.85em; color: var(--gray-600); margin: 0; }
+
+  /* Blocker cards */
+  .blockers-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 20px 0;
+  }
+  @media (max-width: 700px) { .blockers-grid { grid-template-columns: 1fr; } }
+  .blocker-card {
+    border-radius: 10px;
+    padding: 20px;
+    border: 1px solid var(--gray-200);
+  }
+  .blocker-card.critical { border-left: 5px solid var(--danger); background: var(--danger-light); }
+  .blocker-card.high { border-left: 5px solid var(--warning); background: var(--warning-light); }
+  .blocker-card.medium { border-left: 5px solid var(--primary); background: var(--primary-light); }
+  .blocker-card h4 { margin-bottom: 8px; }
+  .blocker-card p { font-size: 0.9em; color: var(--gray-700); margin: 0; }
+
+  /* Tags */
+  .tag {
+    display: inline-block;
+    font-size: 0.75em;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 12px;
+    margin-right: 6px;
+  }
+  .tag-critical { background: var(--danger); color: white; }
+  .tag-high { background: var(--warning); color: white; }
+  .tag-medium { background: var(--primary); color: white; }
+
+  /* Timeline */
+  .timeline {
+    position: relative;
+    padding-left: 30px;
+    margin: 20px 0;
+  }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 10px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--primary);
+    border-radius: 3px;
+  }
+  .timeline-item {
+    position: relative;
+    margin-bottom: 24px;
+    padding-left: 20px;
+  }
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -24px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    background: var(--primary);
+    border-radius: 50%;
+    border: 3px solid white;
+  }
+  .timeline-item h4 { color: var(--primary); margin-bottom: 4px; }
+  .timeline-item p { font-size: 0.9em; color: var(--gray-600); margin: 0; }
+
+  code {
+    background: var(--gray-100);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+  }
+  .verdict {
+    background: linear-gradient(135deg, #059669, #10b981);
+    color: white;
+    border-radius: 12px;
+    padding: 30px;
+    margin: 20px 0;
+    text-align: center;
+  }
+  .verdict h3 { font-size: 1.4em; margin-bottom: 8px; }
+  .verdict p { opacity: 0.95; margin: 0; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Email Sending Service</h1>
+  <p>System design for a smart, cost-effective email platform sending 20,000 emails/day with analytics, deliverability optimization, and automation — all under $50/month.</p>
+  <div class="meta">
+    <span>Author: Ann</span>
+    <span>Date: March 14, 2026</span>
+    <span>Target: 20K emails/day (~600K/month)</span>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- TABLE OF CONTENTS -->
+<div class="toc">
+  <h2>Table of Contents</h2>
+  <ol>
+    <li><a href="#requirements">Requirements & Assumptions</a></li>
+    <li><a href="#architecture">High-Level Architecture</a></li>
+    <li><a href="#components">Component Deep Dive</a></li>
+    <li><a href="#data-model">Data Model</a></li>
+    <li><a href="#email-flow">Email Sending Flow</a></li>
+    <li><a href="#deliverability">Deliverability & Authentication</a></li>
+    <li><a href="#analytics">Analytics & Optimization Engine</a></li>
+    <li><a href="#costs">Full Cost Breakdown</a></li>
+    <li><a href="#blockers">Blockers & Risk Assessment</a></li>
+    <li><a href="#warmup">IP/Domain Warm-Up Plan</a></li>
+    <li><a href="#timeline">Implementation Timeline</a></li>
+    <li><a href="#tradeoffs">Trade-Off Analysis</a></li>
+    <li><a href="#verdict">Final Verdict</a></li>
+  </ol>
+</div>
+
+<!-- 1. REQUIREMENTS -->
+<div class="section" id="requirements">
+  <h2>1. Requirements & Assumptions</h2>
+
+  <h3>Functional Requirements</h3>
+  <table>
+    <tr><th>Feature</th><th>Description</th><th>Priority</th></tr>
+    <tr><td>Campaign Sending</td><td>Compose and send bulk marketing emails to subscriber lists</td><td>P0 — Must have</td></tr>
+    <tr><td>Automation / Drip Flows</td><td>Welcome series, abandoned cart, re-engagement triggered by events</td><td>P0 — Must have</td></tr>
+    <tr><td>Contact Management</td><td>Import, segment, and manage subscriber lists with tags</td><td>P0 — Must have</td></tr>
+    <tr><td>Template Builder</td><td>HTML email editor with reusable templates</td><td>P1 — Should have</td></tr>
+    <tr><td>A/B Testing</td><td>Test subject lines, content, send times across segments</td><td>P1 — Should have</td></tr>
+    <tr><td>Analytics Dashboard</td><td>Opens, clicks, bounces, unsubscribes, deliverability scores</td><td>P0 — Must have</td></tr>
+    <tr><td>Deliverability Monitoring</td><td>Inbox placement tracking, bounce categorization, spam complaint rates</td><td>P0 — Must have</td></tr>
+    <tr><td>Unsubscribe Handling</td><td>One-click unsubscribe, preference center, CAN-SPAM/GDPR compliance</td><td>P0 — Must have</td></tr>
+  </table>
+
+  <h3>Non-Functional Requirements</h3>
+  <table>
+    <tr><th>Requirement</th><th>Target</th></tr>
+    <tr><td>Daily volume</td><td>20,000 emails/day (peak: 40,000)</td></tr>
+    <tr><td>Monthly volume</td><td>~600,000 emails/month</td></tr>
+    <tr><td>Sending rate</td><td>≤14 emails/second (sustained)</td></tr>
+    <tr><td>Delivery latency</td><td>Campaign of 20K emails completes within 30 minutes</td></tr>
+    <tr><td>Monthly infrastructure cost</td><td>Under $50/month</td></tr>
+    <tr><td>Bounce rate</td><td>&lt;2%</td></tr>
+    <tr><td>Spam complaint rate</td><td>&lt;0.1% (Gmail requirement)</td></tr>
+    <tr><td>Availability</td><td>99.9% for campaign scheduling, best-effort for dashboard</td></tr>
+  </table>
+
+  <div class="box box-info">
+    <strong>Key Assumption</strong>
+    You already have a Supabase project. We will leverage Supabase (PostgreSQL, Edge Functions, Cron, and pgmq message queue) as the backbone, paired with AWS SES for the cheapest possible email delivery. This combination keeps costs dramatically low while giving us a production-grade queue and database.
+  </div>
+</div>
+
+<!-- 2. ARCHITECTURE -->
+<div class="section" id="architecture">
+  <h2>2. High-Level Architecture</h2>
+
+  <div class="arch-diagram">
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                              YOUR EMAIL PLATFORM                                 │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────┐     ┌──────────────────────────────────────────────────┐    │
+│  │   WEB DASHBOARD  │     │              SUPABASE BACKEND                    │    │
+│  │   (Next.js /     │────▶│  ┌────────────┐  ┌────────────┐  ┌───────────┐  │    │
+│  │    React SPA)    │     │  │ PostgreSQL  │  │ Edge       │  │ pgmq      │  │    │
+│  │                  │     │  │ Database    │  │ Functions  │  │ Message   │  │    │
+│  │ • Campaign editor│     │  │            │  │            │  │ Queue     │  │    │
+│  │ • List manager   │     │  │ • Contacts │  │ • API      │  │            │  │    │
+│  │ • Analytics view │     │  │ • Campaigns│  │ • Webhooks │  │ • Campaign│  │    │
+│  │ • Template editor│     │  │ • Events   │  │ • Cron     │  │   jobs    │  │    │
+│  │ • A/B test setup │     │  │ • Analytics│  │   triggers │  │ • Drip    │  │    │
+│  └─────────────────┘     │  │ • Templates│  │ • Send     │  │   flow    │  │    │
+│                           │  │            │  │   worker   │  │   events  │  │    │
+│                           │  └────────────┘  └─────┬──────┘  └─────┬─────┘  │    │
+│                           └────────────────────────┼───────────────┼─────────┘    │
+│                                                    │               │              │
+│                                                    ▼               │              │
+│                           ┌──────────────────────────────────────────────────┐    │
+│                           │              EMAIL DELIVERY LAYER                 │    │
+│                           │                                                  │    │
+│                           │  ┌─────────────┐    ┌──────────────────────┐     │    │
+│                           │  │  AWS SES     │    │  SES Event Stream    │     │    │
+│                           │  │  SMTP / API  │    │  (SNS → Webhook)     │     │    │
+│                           │  │              │◀───│                      │     │    │
+│                           │  │ $0.10/1K     │    │ • Delivery events    │     │    │
+│                           │  │ emails       │    │ • Bounce events      │     │    │
+│                           │  │              │    │ • Complaint events   │     │    │
+│                           │  └──────┬───────┘    │ • Open/Click events  │     │    │
+│                           │         │            └──────────┬───────────┘     │    │
+│                           └─────────┼───────────────────────┼────────────────┘    │
+│                                     │                       │                     │
+│                                     ▼                       ▼                     │
+│                           ┌──────────────┐    ┌──────────────────────┐            │
+│                           │   RECIPIENT   │    │  ANALYTICS ENGINE     │            │
+│                           │   INBOX       │    │  (Supabase DB +      │            │
+│                           │              │    │   Edge Functions)     │            │
+│                           │  Gmail       │    │                      │            │
+│                           │  Outlook     │    │ • Event aggregation  │            │
+│                           │  Yahoo       │    │ • Deliverability     │            │
+│                           │  etc.        │    │   scoring            │            │
+│                           └──────────────┘    │ • A/B test results   │            │
+│                                               │ • Engagement heatmap │            │
+│                                               └──────────────────────┘            │
+└──────────────────────────────────────────────────────────────────────────────────┘
+
+EXTERNAL SERVICES:
+┌───────────────┐  ┌────────────────┐  ┌─────────────────┐
+│  AWS SES       │  │  AWS SNS        │  │  Vercel/Netlify  │
+│  (email send)  │  │  (event notify) │  │  (host dashboard)│
+│  ~$60/mo       │  │  Free tier      │  │  Free tier       │
+└───────────────┘  └────────────────┘  └─────────────────┘
+  </div>
+
+  <h3>Architecture Decisions</h3>
+  <table>
+    <tr><th>Decision</th><th>Choice</th><th>Rationale</th></tr>
+    <tr><td>Email Provider</td><td>AWS SES</td><td>Cheapest at $0.10/1K emails. At 600K/mo = ~$60. No other provider comes close.</td></tr>
+    <tr><td>Backend / DB</td><td>Supabase (PostgreSQL)</td><td>Already connected to your project. Free tier includes 500MB DB, Edge Functions, cron, and pgmq queues.</td></tr>
+    <tr><td>Queue System</td><td>Supabase pgmq</td><td>PostgreSQL-native message queue. No extra service needed. Handles campaign batching and drip triggers.</td></tr>
+    <tr><td>Scheduler</td><td>Supabase pg_cron</td><td>Native cron for scheduled campaigns, drip flow triggers, and analytics aggregation. No extra cost.</td></tr>
+    <tr><td>Frontend</td><td>Next.js on Vercel</td><td>Free tier covers dashboard hosting. SSR for fast analytics pages.</td></tr>
+    <tr><td>Event Processing</td><td>SES → SNS → Supabase Edge Function</td><td>AWS SNS delivers SES events (bounces, opens, clicks) to a webhook on Supabase Edge Function.</td></tr>
+  </table>
+</div>
+
+<!-- 3. COMPONENT DEEP DIVE -->
+<div class="section" id="components">
+  <h2>3. Component Deep Dive</h2>
+
+  <h3>3.1 Campaign Orchestrator (Edge Function)</h3>
+  <p>When a user schedules a campaign, the orchestrator breaks the recipient list into batches of 50 and enqueues each batch into pgmq. This prevents overwhelming SES rate limits and enables retry logic per batch.</p>
+  <table>
+    <tr><th>Parameter</th><th>Value</th><th>Why</th></tr>
+    <tr><td>Batch size</td><td>50 recipients</td><td>SES supports up to 50 recipients per <code>SendBulkEmail</code> call</td></tr>
+    <tr><td>Batch interval</td><td>4 seconds</td><td>50 emails every 4 seconds = 12.5/sec, safely under SES's 14/sec default</td></tr>
+    <tr><td>Campaign of 20K</td><td>400 batches × 4s = ~27 minutes</td><td>Completes well within the 30-minute target</td></tr>
+    <tr><td>Retry policy</td><td>3 retries with exponential backoff</td><td>Handles transient SES throttles</td></tr>
+  </table>
+
+  <h3>3.2 Send Worker (Edge Function)</h3>
+  <p>A cron-triggered Edge Function that dequeues batches from pgmq every 4 seconds, personalizes templates (merge tags like <code>{{first_name}}</code>), and calls the SES <code>SendBulkTemplatedEmail</code> API. Each worker invocation processes one batch, records the SES message ID, and updates the campaign progress counter.</p>
+
+  <h3>3.3 Automation Engine (Edge Function + pg_cron)</h3>
+  <p>Drip sequences are stored as a series of steps in the <code>automation_flows</code> table. A cron job runs every minute to check for contacts that have reached their next step's delay threshold, then enqueues their email into pgmq. Trigger events (signup, purchase, tag added) insert into an <code>automation_events</code> table which the cron job monitors.</p>
+
+  <h3>3.4 Webhook Receiver (Edge Function)</h3>
+  <p>AWS SNS pushes SES events (delivery, bounce, complaint, open, click) to a Supabase Edge Function endpoint. The function parses the SNS message, extracts the event type, and inserts into the <code>email_events</code> table. Bounced/complained addresses are automatically flagged in the <code>contacts</code> table to prevent future sends.</p>
+
+  <h3>3.5 Analytics Aggregator (pg_cron)</h3>
+  <p>A nightly cron job aggregates raw events into per-campaign and per-contact summary stats. This powers the dashboard without expensive real-time queries on the events table. Metrics include: open rate, click rate, bounce rate, unsubscribe rate, and deliverability score per campaign.</p>
+</div>
+
+<!-- 4. DATA MODEL -->
+<div class="section" id="data-model">
+  <h2>4. Data Model</h2>
+
+  <div class="arch-diagram" style="font-size: 0.78em;">
+┌─────────────────────┐     ┌──────────────────────┐     ┌─────────────────────┐
+│     contacts         │     │     campaigns          │     │   email_templates    │
+├─────────────────────┤     ├──────────────────────┤     ├─────────────────────┤
+│ id (uuid, PK)       │     │ id (uuid, PK)          │     │ id (uuid, PK)       │
+│ email (unique)      │     │ name                   │     │ name                │
+│ first_name          │     │ subject                │     │ html_body           │
+│ last_name           │     │ template_id (FK)       │     │ text_body           │
+│ tags (text[])       │     │ segment_query (jsonb)  │     │ merge_tags (text[]) │
+│ status (enum)       │     │ status (enum)          │     │ created_at          │
+│ bounce_count        │     │ scheduled_at           │     │ updated_at          │
+│ complaint_count     │     │ sent_count             │     └─────────────────────┘
+│ last_engaged_at     │     │ ab_test_config (jsonb) │
+│ engagement_score    │     │ created_at             │     ┌─────────────────────┐
+│ subscribed_at       │     │ completed_at           │     │  automation_flows    │
+│ unsubscribed_at     │     └──────────────────────┘     ├─────────────────────┤
+│ created_at          │                                    │ id (uuid, PK)       │
+│ metadata (jsonb)    │     ┌──────────────────────┐     │ name                │
+└─────────┬───────────┘     │   email_events         │     │ trigger_type        │
+          │                 ├──────────────────────┤     │ trigger_config      │
+          │                 │ id (bigserial, PK)     │     │ status (enum)       │
+          │                 │ campaign_id (FK)       │     │ created_at          │
+          ├────────────────▶│ contact_id (FK)        │     └─────────┬───────────┘
+          │                 │ ses_message_id         │               │
+          │                 │ event_type (enum)      │     ┌─────────▼───────────┐
+          │                 │   delivery | bounce    │     │  automation_steps    │
+          │                 │   complaint | open     │     ├─────────────────────┤
+          │                 │   click | unsubscribe  │     │ id (uuid, PK)       │
+          │                 │ event_data (jsonb)     │     │ flow_id (FK)        │
+          │                 │ created_at             │     │ step_order          │
+          │                 └──────────────────────┘     │ delay_minutes       │
+          │                                                │ template_id (FK)    │
+          │                 ┌──────────────────────┐     │ subject_override    │
+          │                 │ campaign_stats (mat.) │     └─────────────────────┘
+          └────────────────▶├──────────────────────┤
+                            │ campaign_id (FK)       │     ┌─────────────────────┐
+                            │ total_sent             │     │  suppression_list    │
+                            │ delivered              │     ├─────────────────────┤
+                            │ opened                 │     │ email (PK)          │
+                            │ clicked                │     │ reason (enum)       │
+                            │ bounced                │     │   bounce | complaint│
+                            │ complained             │     │   unsubscribe       │
+                            │ unsubscribed           │     │ source_campaign_id  │
+                            │ open_rate              │     │ suppressed_at       │
+                            │ click_rate             │     └─────────────────────┘
+                            │ updated_at             │
+                            └──────────────────────┘
+  </div>
+
+  <div class="box box-warning">
+    <strong>Important: Suppression List</strong>
+    Every bounce, complaint, and unsubscribe MUST add the email to the <code>suppression_list</code>. The send worker checks this table before every send. Sending to suppressed addresses tanks your sender reputation and can get your SES account suspended.
+  </div>
+</div>
+
+<!-- 5. EMAIL FLOW -->
+<div class="section" id="email-flow">
+  <h2>5. Email Sending Flow</h2>
+
+  <div class="flow-steps">
+    <div class="flow-step">
+      <div class="step-num">1</div>
+      <h4>Schedule Campaign</h4>
+      <p>User selects template, audience segment, and send time via the dashboard</p>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">2</div>
+      <h4>Orchestrate</h4>
+      <p>Edge Function queries contacts matching segment, filters suppressed, splits into 50-recipient batches</p>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">3</div>
+      <h4>Enqueue</h4>
+      <p>Each batch is pushed to pgmq with campaign metadata, template data, and merge fields</p>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">4</div>
+      <h4>Send Worker</h4>
+      <p>pg_cron triggers every 4s. Worker dequeues batch, personalizes, calls SES <code>SendBulkEmail</code></p>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">5</div>
+      <h4>Deliver</h4>
+      <p>SES authenticates (SPF + DKIM + DMARC), delivers to recipient mail servers</p>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">6</div>
+      <h4>Track Events</h4>
+      <p>SES fires events → SNS → Webhook Edge Function → inserts into <code>email_events</code></p>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">7</div>
+      <h4>Auto-Suppress</h4>
+      <p>Bounces and complaints auto-add to suppression list. Hard bounces update contact status.</p>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">8</div>
+      <h4>Aggregate</h4>
+      <p>Nightly cron rolls up events into campaign_stats materialized view for dashboard</p>
+    </div>
+  </div>
+</div>
+
+<!-- 6. DELIVERABILITY -->
+<div class="section" id="deliverability">
+  <h2>6. Deliverability & Authentication Setup</h2>
+
+  <p>This is the <strong>single most important section</strong> of this design. Without proper authentication and warm-up, even 1,000 emails will land in spam. Here is the exact step-by-step setup:</p>
+
+  <h3>Step 1: Domain Authentication (Day 1)</h3>
+  <table>
+    <tr><th>Record</th><th>What to Add</th><th>Purpose</th></tr>
+    <tr>
+      <td><strong>SPF</strong></td>
+      <td>TXT record on your domain:<br><code>v=spf1 include:amazonses.com ~all</code></td>
+      <td>Tells receiving servers that SES is authorized to send on your behalf</td>
+    </tr>
+    <tr>
+      <td><strong>DKIM</strong></td>
+      <td>3 CNAME records provided by SES when you verify your domain (they look like <code>xxxx._domainkey.yourdomain.com</code>)</td>
+      <td>Cryptographic signature proving the email content wasn't tampered with</td>
+    </tr>
+    <tr>
+      <td><strong>DMARC</strong></td>
+      <td>TXT record:<br><code>v=DMARC1; p=none; rua=mailto:dmarc@yourdomain.com; pct=100</code><br>(Start with <code>p=none</code>, move to <code>p=quarantine</code> after 2 weeks, then <code>p=reject</code> after a month)</td>
+      <td>Tells receiving servers what to do with emails that fail SPF/DKIM</td>
+    </tr>
+    <tr>
+      <td><strong>Return-Path</strong></td>
+      <td>SES custom MAIL FROM domain (subdomain like <code>mail.yourdomain.com</code>)</td>
+      <td>Ensures SPF alignment with your From domain — critical for DMARC pass</td>
+    </tr>
+  </table>
+
+  <h3>Step 2: Use a Subdomain for Marketing</h3>
+  <div class="box box-warning">
+    <strong>Never send marketing emails from your main domain</strong>
+    Use a subdomain like <code>mail.yourdomain.com</code> or <code>news.yourdomain.com</code>. If your marketing reputation takes a hit, your company's transactional emails (password resets, invoices) remain unaffected. Set up separate SPF, DKIM, and DMARC for this subdomain.
+  </div>
+
+  <h3>Step 3: SES Configuration Checklist</h3>
+  <table>
+    <tr><th>#</th><th>Action</th><th>Details</th></tr>
+    <tr><td>1</td><td>Move out of SES Sandbox</td><td>Submit production access request via AWS console. Include your use case, expected volume (20K/day), and how you handle bounces/complaints. Takes 24–48 hours to approve.</td></tr>
+    <tr><td>2</td><td>Verify your sending domain</td><td>In SES console → Verified Identities → Add domain. Add the DKIM CNAME records and SPF TXT record to your DNS.</td></tr>
+    <tr><td>3</td><td>Set up custom MAIL FROM</td><td>Configure <code>mail.yourdomain.com</code> as your MAIL FROM domain. Add the MX and TXT records SES provides.</td></tr>
+    <tr><td>4</td><td>Enable event publishing</td><td>Create a Configuration Set with event destinations → SNS topic for all event types (send, delivery, bounce, complaint, open, click).</td></tr>
+    <tr><td>5</td><td>Set up SNS subscription</td><td>Subscribe your Supabase Edge Function webhook URL to the SNS topic. Confirm the subscription.</td></tr>
+    <tr><td>6</td><td>Add List-Unsubscribe headers</td><td>Every marketing email must include <code>List-Unsubscribe</code> and <code>List-Unsubscribe-Post</code> headers. Required by Gmail and Yahoo since Feb 2024.</td></tr>
+  </table>
+</div>
+
+<!-- 7. ANALYTICS -->
+<div class="section" id="analytics">
+  <h2>7. Analytics & Optimization Engine</h2>
+
+  <h3>Core Metrics Dashboard</h3>
+  <table>
+    <tr><th>Metric</th><th>How Calculated</th><th>Target</th></tr>
+    <tr><td>Delivery Rate</td><td>delivered / sent × 100</td><td>&gt;97%</td></tr>
+    <tr><td>Open Rate</td><td>unique opens / delivered × 100</td><td>&gt;20%</td></tr>
+    <tr><td>Click Rate</td><td>unique clicks / delivered × 100</td><td>&gt;2.5%</td></tr>
+    <tr><td>Bounce Rate</td><td>(hard bounces + soft bounces) / sent × 100</td><td>&lt;2%</td></tr>
+    <tr><td>Spam Complaint Rate</td><td>complaints / delivered × 100</td><td>&lt;0.1%</td></tr>
+    <tr><td>Unsubscribe Rate</td><td>unsubscribes / delivered × 100</td><td>&lt;0.5%</td></tr>
+    <tr><td>Engagement Score</td><td>Weighted: opens (1pt) + clicks (3pt) + replies (5pt), decayed over 90 days</td><td>Per contact</td></tr>
+  </table>
+
+  <h3>A/B Testing Engine</h3>
+  <p>The <code>ab_test_config</code> JSONB field on campaigns stores variants (up to 4). The orchestrator splits the audience randomly — e.g., 10% variant A, 10% variant B, 80% held back. After a configurable wait period (default: 4 hours), a cron job evaluates the winning variant by open rate or click rate, then sends the winner to the remaining 80%.</p>
+
+  <h3>Deliverability Scoring</h3>
+  <p>A per-campaign "Deliverability Score" (0–100) is computed from weighted factors: delivery rate (40%), bounce rate (25%), complaint rate (25%), and authentication pass rate (10%). Campaigns scoring below 70 trigger an alert in the dashboard with specific recommendations (e.g., "Clean your list — 3.2% bounce rate exceeds the 2% threshold").</p>
+
+  <h3>Smart Send-Time Optimization</h3>
+  <p>After collecting 30+ days of open data, the system computes optimal send hours per timezone bucket (UTC offset) based on historical open rates. The campaign scheduler can auto-distribute sends across these optimal windows instead of blasting all at once.</p>
+</div>
+
+<!-- 8. COST BREAKDOWN -->
+<div class="section" id="costs">
+  <h2>8. Full Cost Breakdown</h2>
+
+  <div class="box box-info">
+    <strong>Calculation Basis</strong>
+    20,000 emails/day × 30 days = 600,000 emails/month. All costs are monthly estimates based on published 2026 pricing.
+  </div>
+
+  <h3>Option A: Absolute Minimum (Under $50 Target)</h3>
+  <table class="cost-table">
+    <tr><th>Service</th><th>What It Covers</th><th>Tier</th><th>Monthly Cost</th></tr>
+    <tr><td>AWS SES — Email Sending</td><td>600,000 emails × $0.10/1K</td><td>Pay-as-you-go</td><td>$60.00</td></tr>
+    <tr><td>AWS SES — Data Transfer</td><td>~3GB outbound (avg 5KB/email)</td><td>First 100GB free</td><td>$0.00</td></tr>
+    <tr><td>AWS SNS — Event Notifications</td><td>~1.2M notifications (2 events avg per email)</td><td>First 1M free, then $0.50/M</td><td>$0.10</td></tr>
+    <tr><td>Supabase — Database</td><td>PostgreSQL (contacts, campaigns, events, analytics)</td><td>Free tier (500MB, 50K MAU)</td><td>$0.00</td></tr>
+    <tr><td>Supabase — Edge Functions</td><td>Send worker, webhook receiver, API (~1.2M invocations)</td><td>Free tier: 500K. <strong>Exceeds by ~712K.</strong> Batch webhooks to stay in free tier, OR upgrade to Pro.</td><td>$0.00*</td></tr>
+    <tr><td>Supabase — pgmq Queue</td><td>Campaign batch queue, drip triggers</td><td>Included in free tier</td><td>$0.00</td></tr>
+    <tr><td>Vercel — Dashboard Hosting</td><td>Next.js web app</td><td>Free / Hobby tier</td><td>$0.00</td></tr>
+    <tr><td>Domain (sending subdomain)</td><td>DNS for mail.yourdomain.com</td><td>Use existing domain</td><td>$0.00</td></tr>
+    <tr class="total"><td colspan="3">TOTAL (Option A) — with webhook batching to stay on free tier</td><td>~$60.10/mo</td></tr>
+    <tr><td colspan="4" style="font-size:0.85em; color:#6b7280;">* Edge Function free tier will be exceeded if each SES event triggers a separate invocation (~1.2M/mo vs 500K limit). <strong>Solution:</strong> Configure SNS to batch multiple events per delivery (up to 10), reducing invocations to ~120K/mo. Alternatively, upgrade Supabase to Pro ($25/mo) for 2M invocations.</td></tr>
+  </table>
+
+  <div class="box box-danger">
+    <strong>Honest Assessment: $50/month is very tight</strong>
+    AWS SES alone costs $60/month for 600K emails. The only way to hit under $50 is to reduce volume to ~15K emails/day (450K/month = $45). However, during your first 12 months on AWS, you get 3,000 free emails/month + $200 in AWS credits, which effectively gives you several months free or heavily subsidized. After credits expire, the realistic floor is <strong>$60–65/month</strong> for 20K/day.
+  </div>
+
+  <h3>Option B: If You Reduce to 15K Emails/Day</h3>
+  <table class="cost-table">
+    <tr><th>Service</th><th>Calculation</th><th>Monthly Cost</th></tr>
+    <tr><td>AWS SES</td><td>450,000 emails × $0.10/1K</td><td>$45.00</td></tr>
+    <tr><td>AWS SNS</td><td>~900K notifications</td><td>$0.00</td></tr>
+    <tr><td>Supabase + Vercel</td><td>Free tiers</td><td>$0.00</td></tr>
+    <tr class="total"><td colspan="2">TOTAL (Option B)</td><td>~$45.00/mo</td></tr>
+  </table>
+
+  <h3>One-Time Setup Costs</h3>
+  <table class="cost-table">
+    <tr><th>Item</th><th>Cost</th><th>Notes</th></tr>
+    <tr><td>Domain name (if needed)</td><td>$10–15/year</td><td>For your sending subdomain. Skip if you already own a domain.</td></tr>
+    <tr><td>AWS account setup</td><td>$0</td><td>Free to create. No upfront costs.</td></tr>
+    <tr><td>Supabase project</td><td>$0</td><td>Already connected.</td></tr>
+    <tr><td>SSL certificate</td><td>$0</td><td>Free via Let's Encrypt / Vercel.</td></tr>
+    <tr><td>Development time</td><td>Your time</td><td>Estimated 2–4 weeks to build the full platform (see timeline).</td></tr>
+    <tr class="total"><td colspan="2">TOTAL One-Time</td><td>$0–15</td></tr>
+  </table>
+
+  <h3>Cost Comparison vs. Competitors</h3>
+  <table>
+    <tr><th>Platform</th><th>Cost for 600K emails/mo</th><th>Includes Dashboard?</th><th>Includes Automation?</th></tr>
+    <tr><td><strong>Your Platform (this design)</strong></td><td><strong>~$60/mo</strong></td><td>Yes (you build it)</td><td>Yes (you build it)</td></tr>
+    <tr><td>Mailchimp Standard</td><td>~$350/mo</td><td>Yes</td><td>Yes</td></tr>
+    <tr><td>SendGrid (Marketing)</td><td>~$255/mo</td><td>Yes</td><td>Limited</td></tr>
+    <tr><td>Brevo</td><td>~$65/mo (100K limit)</td><td>Yes</td><td>Yes</td></tr>
+    <tr><td>Mailgun</td><td>~$255/mo</td><td>Basic</td><td>No</td></tr>
+  </table>
+
+  <div class="verdict">
+    <h3>You save $190–290/month vs. Mailchimp</h3>
+    <p>That's $2,280–3,480/year in exchange for building and maintaining the platform yourself.</p>
+  </div>
+</div>
+
+<!-- 9. BLOCKERS -->
+<div class="section" id="blockers">
+  <h2>9. Blockers & Risk Assessment</h2>
+
+  <div class="blockers-grid">
+    <div class="blocker-card critical">
+      <span class="tag tag-critical">CRITICAL</span>
+      <h4>SES Sandbox Escape</h4>
+      <p>New AWS accounts start in a sandbox limited to 200 emails/day to verified addresses only. You must request production access and provide a convincing use case. AWS reviews can take 24–72 hours and may be denied if your use case seems spammy. <strong>Mitigation:</strong> Write a clear, detailed production access request explaining your opt-in list, bounce handling, and complaint processing. Include this system design.</p>
+    </div>
+    <div class="blocker-card critical">
+      <span class="tag tag-critical">CRITICAL</span>
+      <h4>Domain/IP Warm-Up Period</h4>
+      <p>You CANNOT send 20K emails on day one. ISPs will immediately flag you as spam. You must gradually ramp up over 4–6 weeks (see warm-up plan below). <strong>This means your service won't reach full capacity for ~6 weeks after launch.</strong> There is no shortcut around this.</p>
+    </div>
+    <div class="blocker-card critical">
+      <span class="tag tag-critical">CRITICAL</span>
+      <h4>Shared IP Reputation Risk</h4>
+      <p>On SES's shared IPs, your deliverability depends partly on other senders. A bad actor on the same IP range can hurt your inbox placement. <strong>Mitigation:</strong> Monitor deliverability closely. If issues arise, consider a dedicated IP ($24.95/mo) — but only once you're consistently sending 10K+/day to maintain its reputation.</p>
+    </div>
+    <div class="blocker-card high">
+      <span class="tag tag-high">HIGH</span>
+      <h4>Supabase Edge Function Limits</h4>
+      <p>Free tier: 500K invocations/month, 150s timeout. At 20K emails/day in batches of 50, that's ~12,000 worker invocations/month just for sending, plus webhook events. You may approach the 500K limit with heavy event traffic. <strong>Mitigation:</strong> Batch webhook processing (process multiple SNS messages per invocation). Upgrade to Supabase Pro ($25/mo) if needed.</p>
+    </div>
+    <div class="blocker-card high">
+      <span class="tag tag-high">HIGH</span>
+      <h4>List Quality</h4>
+      <p>If your email list has old, invalid, or purchased addresses, you'll hit high bounce rates immediately, damaging your sender reputation before it's even established. <strong>Mitigation:</strong> Run your list through an email verification service (e.g., ZeroBounce, NeverBounce — ~$5 for 10K verifications) before sending a single email.</p>
+    </div>
+    <div class="blocker-card high">
+      <span class="tag tag-high">HIGH</span>
+      <h4>CAN-SPAM / GDPR Compliance</h4>
+      <p>Every marketing email must include: physical mailing address, clear unsubscribe link, honest subject lines, and proper sender identification. GDPR requires explicit consent records for EU recipients. <strong>Mitigation:</strong> Build unsubscribe handling into the system from day one. Store consent timestamps.</p>
+    </div>
+    <div class="blocker-card medium">
+      <span class="tag tag-medium">MEDIUM</span>
+      <h4>Development Effort</h4>
+      <p>Building this from scratch requires significant development time: Edge Functions for sending/webhooks, a React dashboard, template editor, and analytics views. Estimated 2–4 weeks for a solo developer. <strong>Mitigation:</strong> Start with an MVP (campaign send + basic analytics) and iterate.</p>
+    </div>
+    <div class="blocker-card medium">
+      <span class="tag tag-medium">MEDIUM</span>
+      <h4>Open Tracking Accuracy</h4>
+      <p>Apple Mail Privacy Protection (since iOS 15) pre-fetches tracking pixels, inflating open rates. Gmail may clip emails over 102KB, hiding the tracking pixel. <strong>Mitigation:</strong> Treat open rates as directional, not absolute. Focus on click rates and engagement scores for decision-making.</p>
+    </div>
+  </div>
+</div>
+
+<!-- 10. WARM-UP -->
+<div class="section" id="warmup">
+  <h2>10. IP/Domain Warm-Up Plan</h2>
+
+  <div class="box box-danger">
+    <strong>This is non-negotiable</strong>
+    Skip this and your emails go straight to spam. ISPs need to see gradually increasing volume with strong engagement signals before they trust your domain.
+  </div>
+
+  <table>
+    <tr><th>Week</th><th>Daily Volume</th><th>Target Audience</th><th>Key Actions</th></tr>
+    <tr><td>Week 1</td><td>500</td><td>Your most engaged contacts (opened/clicked in last 30 days)</td><td>Monitor bounce rate, check spam placement with seed tests</td></tr>
+    <tr><td>Week 2</td><td>1,000–2,000</td><td>Contacts engaged in last 60 days</td><td>Check Gmail Postmaster Tools daily. Address any spam rate spikes.</td></tr>
+    <tr><td>Week 3</td><td>3,000–5,000</td><td>Contacts engaged in last 90 days</td><td>Start A/B testing subject lines. Begin first automation flow.</td></tr>
+    <tr><td>Week 4</td><td>7,000–10,000</td><td>Broader segments, still filtering unengaged</td><td>Review deliverability score. Clean any addresses that bounced.</td></tr>
+    <tr><td>Week 5</td><td>12,000–15,000</td><td>Full list minus suppressed and long-inactive</td><td>Monitor complaint rate. If &gt;0.1%, slow down and investigate.</td></tr>
+    <tr><td>Week 6</td><td>18,000–20,000</td><td>Full operational volume</td><td>Establish baseline metrics. Move DMARC to p=reject.</td></tr>
+  </table>
+
+  <h3>Warm-Up Rules</h3>
+  <p><strong>Rule 1:</strong> If bounce rate exceeds 3% on any day, STOP and clean your list before continuing.</p>
+  <p><strong>Rule 2:</strong> If spam complaint rate exceeds 0.1%, reduce volume by 50% and investigate content/list quality.</p>
+  <p><strong>Rule 3:</strong> Only send to opt-in contacts during warm-up. Never use purchased lists.</p>
+  <p><strong>Rule 4:</strong> Register for <a href="https://postmaster.google.com">Gmail Postmaster Tools</a> on day one. This gives you real-time visibility into your domain reputation with Gmail.</p>
+</div>
+
+<!-- 11. TIMELINE -->
+<div class="section" id="timeline">
+  <h2>11. Implementation Timeline</h2>
+
+  <div class="timeline">
+    <div class="timeline-item">
+      <h4>Week 1: Foundation</h4>
+      <p>Set up AWS SES account, request production access, verify domain, configure SPF/DKIM/DMARC. Create Supabase database schema (contacts, campaigns, events, templates tables). Set up SNS topic and event publishing.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>Week 2: Core Sending Pipeline</h4>
+      <p>Build the campaign orchestrator Edge Function, send worker with pgmq integration, and webhook receiver for SES events. Test end-to-end: schedule campaign → batch → send → receive events. Begin warm-up at 500/day.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>Week 3: Dashboard MVP</h4>
+      <p>Build Next.js dashboard with: campaign list, basic campaign creation form, contact import (CSV upload), and real-time campaign status. Add the analytics aggregation cron job and campaign stats view.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>Week 4: Automation & Polish</h4>
+      <p>Implement drip flow engine (automation_flows + automation_steps), A/B testing logic, template editor with merge tag preview, and unsubscribe/preference center page. Continue warm-up ramp.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>Weeks 5–6: Optimization & Full Volume</h4>
+      <p>Add deliverability scoring, send-time optimization, engagement-based segmentation, and the full analytics dashboard. Complete warm-up to 20K/day capacity.</p>
+    </div>
+  </div>
+</div>
+
+<!-- 12. TRADE-OFFS -->
+<div class="section" id="tradeoffs">
+  <h2>12. Trade-Off Analysis</h2>
+
+  <table>
+    <tr><th>Decision</th><th>Upside</th><th>Downside</th><th>When to Revisit</th></tr>
+    <tr>
+      <td>AWS SES shared IPs (no dedicated IP)</td>
+      <td>Saves $24.95/mo per IP. No need to warm up a dedicated IP.</td>
+      <td>Deliverability at mercy of shared pool. Other bad senders can hurt you.</td>
+      <td>If inbox placement drops below 90% despite good list hygiene. Or once you're consistently above 10K/day.</td>
+    </tr>
+    <tr>
+      <td>Supabase free tier</td>
+      <td>$0/month. Includes DB, Edge Functions, cron, queue.</td>
+      <td>500MB DB limit, 500K function invocations. May outgrow in 6–12 months.</td>
+      <td>When email_events table exceeds 300MB (~3-5M rows). Archive old events or upgrade to Pro ($25/mo).</td>
+    </tr>
+    <tr>
+      <td>Build dashboard from scratch</td>
+      <td>Full control, no vendor lock-in, exactly the features you want.</td>
+      <td>Significant dev time (2–4 weeks). Must maintain it yourself.</td>
+      <td>If dev time becomes bottleneck, consider open-source alternatives like Mautic or listmonk.</td>
+    </tr>
+    <tr>
+      <td>PostgreSQL for analytics (vs. dedicated analytics DB)</td>
+      <td>Simple stack, no extra cost, good enough for 600K events/month.</td>
+      <td>Analytics queries may slow down as events table grows past millions of rows.</td>
+      <td>If dashboard load times exceed 3s. Add materialized views, partition by month, or move to ClickHouse.</td>
+    </tr>
+    <tr>
+      <td>No dedicated email template builder</td>
+      <td>Raw HTML templates with merge tags are simple and flexible.</td>
+      <td>Non-technical users can't easily create emails. No drag-and-drop.</td>
+      <td>If non-developers need to create campaigns. Add an open-source editor like GrapeJS or MJML.</td>
+    </tr>
+  </table>
+</div>
+
+<!-- 13. VERDICT -->
+<div class="section" id="verdict">
+  <h2>13. Final Verdict</h2>
+
+  <div class="verdict">
+    <h3>Feasible — with caveats</h3>
+    <p>This system can absolutely work and will save you $200+/month vs. Mailchimp. But the $50/mo target is just barely out of reach at full volume.</p>
+  </div>
+
+  <h3>The Honest Numbers</h3>
+  <table>
+    <tr><th>Scenario</th><th>Monthly Cost</th><th>Feasibility</th></tr>
+    <tr><td>15K emails/day (450K/mo)</td><td>~$45/mo</td><td>Hits your budget. Still very effective for most use cases.</td></tr>
+    <tr><td>20K emails/day (600K/mo)</td><td>~$60/mo</td><td>$10–15 over budget. Best value for money at this volume.</td></tr>
+    <tr><td>20K/day + dedicated IP</td><td>~$85/mo</td><td>Better deliverability control. Worth it once you're established.</td></tr>
+    <tr><td>20K/day + Supabase Pro</td><td>~$85/mo</td><td>More headroom on DB and functions. Needed if you grow past free tier.</td></tr>
+  </table>
+
+  <h3>Recommended Path Forward</h3>
+  <p><strong>Phase 1 (Months 1–2):</strong> Build the MVP with SES + Supabase free tiers. Use AWS's $200 free credits to cover SES costs during development and warm-up. Your effective cost during this phase: <strong>$0/month</strong>.</p>
+  <p><strong>Phase 2 (Months 3–6):</strong> Operate at full 20K/day volume. AWS credits may still cover some costs. Realistic cost: <strong>$45–60/month</strong>.</p>
+  <p><strong>Phase 3 (6+ months):</strong> Evaluate whether you need a dedicated IP ($25/mo) or Supabase Pro ($25/mo) based on actual deliverability metrics and DB usage. Max realistic cost: <strong>$85–110/month</strong> — still 70% cheaper than Mailchimp.</p>
+
+  <div class="box box-success">
+    <strong>Bottom Line</strong>
+    For 20K marketing emails/day with analytics and automation, this architecture gives you a Mailchimp-class platform at 80% lower cost. The biggest investment isn't money — it's the 2–4 weeks of development time and the 6-week warm-up period before you can send at full volume. If you're willing to invest that time, this is an excellent approach.
+  </div>
+</div>
+
+</div><!-- /container -->
+</body>
+</html>
