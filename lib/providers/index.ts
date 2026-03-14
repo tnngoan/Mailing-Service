@@ -41,8 +41,9 @@ export function getProviders(): EmailProvider[] {
   const providers = factories
     .map((fn) => fn())
     .filter((p): p is EmailProvider => p !== null)
-    // Sort by daily limit descending so biggest providers get most emails
-    .sort((a, b) => b.dailyLimit - a.dailyLimit);
+    // Sort by batch size descending — fastest providers (fewest API calls) go first
+    // to maximize emails sent before Vercel function timeout
+    .sort((a, b) => b.batchSize - a.batchSize || b.dailyLimit - a.dailyLimit);
 
   if (providers.length === 0) {
     console.error('[providers] No email providers configured — set at least one API key');
