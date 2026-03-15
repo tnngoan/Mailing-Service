@@ -20,12 +20,27 @@ interface ProviderReport {
   errors: string[];
 }
 
+interface ProviderAssignment {
+  provider: string;
+  total: number;
+  pending: number;
+  sent: number;
+  failed: number;
+}
+
+interface DailyProviderEntry {
+  day: number;
+  providers: { provider: string; sent: number; failed: number }[];
+}
+
 interface CampaignDetail extends Campaign {
   pendingCount: number;
   dailyLimit: number;
   daysRemaining: number;
   batchHistory: { day: number; sent: number; failed: number }[];
   providerReport: ProviderReport[];
+  providerAssignments: ProviderAssignment[];
+  dailyProviderReport: DailyProviderEntry[];
 }
 
 interface Props {
@@ -321,10 +336,99 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
                     </div>
                   )}
 
-                  {/* Batch history */}
+                  {/* Provider assignment table */}
+                  {detail.providerAssignments && detail.providerAssignments.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-zinc-500 font-medium">Email assignments by provider</p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-zinc-500 border-b border-zinc-800">
+                              <th className="text-left py-1.5 px-2 font-medium">Provider</th>
+                              <th className="text-right py-1.5 px-2 font-medium">Total</th>
+                              <th className="text-right py-1.5 px-2 font-medium">Sent</th>
+                              <th className="text-right py-1.5 px-2 font-medium">Failed</th>
+                              <th className="text-right py-1.5 px-2 font-medium">Pending</th>
+                              <th className="text-right py-1.5 px-2 font-medium">Progress</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {detail.providerAssignments.map((a) => {
+                              const pct = a.total > 0 ? Math.round((a.sent / a.total) * 100) : 0;
+                              return (
+                                <tr key={a.provider} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
+                                  <td className="py-1.5 px-2 text-zinc-300 font-medium">{a.provider}</td>
+                                  <td className="py-1.5 px-2 text-right text-zinc-400">{a.total.toLocaleString()}</td>
+                                  <td className="py-1.5 px-2 text-right text-green-400">{a.sent > 0 ? a.sent.toLocaleString() : '-'}</td>
+                                  <td className="py-1.5 px-2 text-right text-red-400">{a.failed > 0 ? a.failed.toLocaleString() : '-'}</td>
+                                  <td className="py-1.5 px-2 text-right text-yellow-400">{a.pending > 0 ? a.pending.toLocaleString() : '-'}</td>
+                                  <td className="py-1.5 px-2 text-right">
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                                        <div className="h-full bg-green-500 rounded-full" style={{ width: `${pct}%` }} />
+                                      </div>
+                                      <span className="text-zinc-500 w-8 text-right">{pct}%</span>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Daily report by provider */}
+                  {detail.dailyProviderReport && detail.dailyProviderReport.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-zinc-500 font-medium">Daily report by provider</p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-zinc-500 border-b border-zinc-800">
+                              <th className="text-left py-1.5 px-2 font-medium">Day</th>
+                              <th className="text-left py-1.5 px-2 font-medium">Provider</th>
+                              <th className="text-right py-1.5 px-2 font-medium">Sent</th>
+                              <th className="text-right py-1.5 px-2 font-medium">Failed</th>
+                              <th className="text-right py-1.5 px-2 font-medium">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {detail.dailyProviderReport.map((d) =>
+                              d.providers.map((p, i) => (
+                                <tr
+                                  key={`${d.day}-${p.provider}`}
+                                  className={`border-b border-zinc-800/50 hover:bg-zinc-800/30 ${
+                                    i === 0 ? '' : ''
+                                  }`}
+                                >
+                                  <td className="py-1.5 px-2 text-zinc-400 font-medium">
+                                    {i === 0 ? `Batch ${d.day}` : ''}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-zinc-300">{p.provider}</td>
+                                  <td className="py-1.5 px-2 text-right text-green-400">
+                                    {p.sent > 0 ? p.sent.toLocaleString() : '-'}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-right text-red-400">
+                                    {p.failed > 0 ? p.failed.toLocaleString() : '-'}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-right text-zinc-500">
+                                    {(p.sent + p.failed).toLocaleString()}
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Batch history summary */}
                   {detail.batchHistory.length > 0 && (
                     <div className="space-y-1.5">
-                      <p className="text-xs text-zinc-500 font-medium">Batch history</p>
+                      <p className="text-xs text-zinc-500 font-medium">Batch summary</p>
                       {detail.batchHistory.map((b) => (
                         <div key={b.day} className="flex items-center gap-2 text-xs bg-zinc-800/50 rounded px-2 py-1.5">
                           <span className="text-zinc-400 font-medium w-16">Batch {b.day}</span>

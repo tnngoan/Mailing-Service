@@ -87,6 +87,55 @@ export async function GET(
       }))
       .sort((a, b) => b.sent - a.sent || a.failed - b.failed);
 
+    // Provider assignment overview (total assigned per provider including pending)
+    const providerAssignments = await prisma.recipient.groupBy({
+      by: ['provider', 'status'],
+      where: { campaignId: id },
+      _count: true,
+    });
+
+    const assignmentMap = new Map<string, { total: number; pending: number; sent: number; failed: number }>();
+    for (const row of providerAssignments) {
+      const key = row.provider ?? 'unassigned';
+      const entry = assignmentMap.get(key) ?? { total: 0, pending: 0, sent: 0, failed: 0 };
+      entry.total += row._count;
+      if (row.status === 'pending') entry.pending = row._count;
+      if (row.status === 'sent') entry.sent = row._count;
+      if (row.status === 'failed') entry.failed = row._count;
+      assignmentMap.set(key, entry);
+    }
+
+    const providerAssignmentList = Array.from(assignmentMap.entries())
+      .map(([provider, counts]) => ({ provider, ...counts }))
+      .sort((a, b) => b.total - a.total);
+
+    // Daily breakdown by provider (batch day × provider)
+    const dailyByProvider = await prisma.recipient.groupBy({
+      by: ['batchDay', 'provider', 'status'],
+      where: { campaignId: id, batchDay: { not: null }, provider: { not: null } },
+      _count: true,
+    });
+
+    const dailyProviderMap = new Map<number, Map<string, { sent: number; failed: number }>>();
+    for (const row of dailyByProvider) {
+      if (row.batchDay === null || !row.provider) continue;
+      const dayMap = dailyProviderMap.get(row.batchDay) ?? new Map();
+      const entry = dayMap.get(row.provider) ?? { sent: 0, failed: 0 };
+      if (row.status === 'sent') entry.sent = row._count;
+      if (row.status === 'failed') entry.failed = row._count;
+      dayMap.set(row.provider, entry);
+      dailyProviderMap.set(row.batchDay, dayMap);
+    }
+
+    const dailyProviderReport = Array.from(dailyProviderMap.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([day, providers]) => ({
+        day,
+        providers: Array.from(providers.entries())
+          .map(([provider, counts]) => ({ provider, ...counts }))
+          .sort((a, b) => b.sent - a.sent),
+      }));
+
     const dailyLimit = getTotalDailyLimit();
     const daysRemaining = dailyLimit > 0 ? Math.ceil(pendingCount / dailyLimit) : 0;
 
@@ -101,6 +150,8 @@ export async function GET(
         .sort(([a], [b]) => a - b)
         .map(([day, counts]) => ({ day, ...counts })),
       providerReport,
+      providerAssignments: providerAssignmentList,
+      dailyProviderReport,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

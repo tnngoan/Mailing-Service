@@ -8,7 +8,8 @@
  */
 
 import type { EmailProvider, SendResult } from './types';
-import { createMailerSendProvider } from './mailersend';   // 1000/day free
+import { createMailerSendProvider } from './mailersend';   // 500/day free
+import { createAhaSendProvider } from './ahasend';         // 33/day free
 import { createSendPulseProvider } from './sendpulse';     // 400/day free
 import { createBrevoProvider } from './brevo';             // 300/day free
 import { createSmtp2goProvider } from './smtp2go';         // 200/day free
@@ -36,6 +37,7 @@ export function getProviders(): EmailProvider[] {
     createMailgunProvider,     // 100/day
     createElasticEmailProvider, // 100/day
     createResendProvider,      // 100/day
+    createAhaSendProvider,     // 33/day
   ];
 
   const tierOrder = { proven: 0, untested: 1, unreliable: 2 };
