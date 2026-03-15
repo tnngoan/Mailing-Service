@@ -4,6 +4,9 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'Bulk Email Sender',
   description: 'Send email campaigns at scale',
+  icons: {
+    icon: '/icon.svg',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

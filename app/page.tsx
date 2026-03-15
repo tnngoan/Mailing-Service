@@ -41,6 +41,7 @@ export default function Dashboard() {
   const [content, setContent] = useState('');
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvCount, setCsvCount] = useState<number | null>(null);
+  const [images, setImages] = useState<File[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [sending, setSending] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -54,6 +55,7 @@ export default function Dashboard() {
   const [capacityLoading, setCapacityLoading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   function showToast(msg: string, type: 'success' | 'error') {
     setToast({ msg, type });
@@ -133,6 +135,7 @@ export default function Dashboard() {
       formData.append('subject', subject.trim());
       formData.append('content', content.trim());
       formData.append('file', csvFile);
+      images.forEach((img) => formData.append('images', img));
 
       const res = await fetch('/api/campaigns', { method: 'POST', body: formData });
       const data = await res.json();
@@ -162,7 +165,9 @@ export default function Dashboard() {
         setContent('');
         setCsvFile(null);
         setCsvCount(null);
+        setImages([]);
         if (fileInputRef.current) fileInputRef.current.value = '';
+        if (imageInputRef.current) imageInputRef.current.value = '';
       }
     } catch {
       showToast('Network error. Try again.', 'error');
@@ -173,40 +178,24 @@ export default function Dashboard() {
 
   const canSend = !!csvFile && !!subject.trim() && !!content.trim() && !sending;
 
-  // Parse diagnostics from the most recent campaign with error data
-  const diagnosticCampaign = campaigns.find((c) => c.errorMessage);
-  let diagnostics: {
-    provider: string;
-    status: string;
-    assigned: number;
-    sent: number;
-    failed: number;
-    skipped: number;
-    reason?: string;
-    errors: string[];
-  }[] = [];
-  try {
-    if (diagnosticCampaign?.errorMessage) {
-      const parsed = JSON.parse(diagnosticCampaign.errorMessage);
-      if (Array.isArray(parsed)) diagnostics = parsed;
-    }
-  } catch {}
-
-  const hasDiagnostics = diagnostics.length > 0;
-
   return (
-    <main className="min-h-screen p-6 md:p-10 max-w-7xl mx-auto">
+    <main className="min-h-screen p-6 md:p-10 max-w-3xl mx-auto">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-zinc-100">Bulk Email Sender</h1>
-        <p className="text-zinc-500 mt-1 text-sm">
-          Upload a CSV, write your message, then send daily batches across multiple providers.
-        </p>
+      <div className="mb-8 flex items-center gap-3">
+        <svg className="w-8 h-8 shrink-0" viewBox="0 0 32 32" fill="none">
+          <rect width="32" height="32" rx="6" fill="#3B82F6"/>
+          <path d="M6 10L16 18L26 10" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <rect x="6" y="9" width="20" height="14" rx="2" stroke="white" strokeWidth="2" fill="none"/>
+        </svg>
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-100">Bulk Email Sender</h1>
+          <p className="text-zinc-500 mt-0.5 text-sm">
+            Upload a CSV, write your message, then send daily batches.
+          </p>
+        </div>
       </div>
 
-      <div className={`flex gap-6 ${hasDiagnostics ? 'flex-col lg:flex-row' : ''}`}>
-      {/* Left column — main content */}
-      <div className={hasDiagnostics ? 'flex-1 min-w-0' : 'max-w-3xl mx-auto w-full'}>
+      <div>
 
       {/* Capacity dashboard */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 mb-4 space-y-3">
@@ -264,7 +253,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {capacityData.providers.map((p, i) => {
+                {capacityData.providers.filter((p) => p.status !== 'inactive' && p.status !== 'error').map((p, i) => {
                   const pct = p.configuredLimit > 0 ? Math.round((p.remaining / p.configuredLimit) * 100) : 0;
                   const statusColor = p.status === 'available'
                     ? 'text-green-400 bg-green-950/50'
@@ -412,6 +401,59 @@ export default function Dashboard() {
           />
         </div>
 
+        {/* Image attachments */}
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1.5">
+            Images <span className="text-zinc-600">(optional — graphs, charts, etc.)</span>
+          </label>
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              setImages((prev) => [...prev, ...files]);
+            }}
+          />
+          {images.length > 0 ? (
+            <div className="space-y-1.5">
+              {images.map((img, i) => (
+                <div key={i} className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2">
+                  <svg className="w-4 h-4 text-blue-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span className="text-sm text-zinc-200 truncate flex-1">{img.name}</span>
+                  <span className="text-[10px] text-zinc-500">{(img.size / 1024).toFixed(0)}KB</span>
+                  <button
+                    onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
+                    className="text-zinc-500 hover:text-zinc-300 text-xs"
+                  >
+                    x
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => imageInputRef.current?.click()}
+                className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                + Add more images
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => imageInputRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 border border-dashed border-zinc-600 hover:border-zinc-500 rounded-md px-3 py-2.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              Attach images
+            </button>
+          )}
+        </div>
+
         <button
           onClick={handleSend}
           disabled={!canSend}
@@ -432,104 +474,7 @@ export default function Dashboard() {
         onToast={showToast}
       />
 
-      </div>{/* End left column */}
-
-      {/* Right column — Error Diagnostic Report */}
-      {hasDiagnostics && (
-        <div className="lg:w-96 shrink-0">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 sticky top-6 space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">
-                Error Report
-              </h2>
-              <span className="text-[10px] text-zinc-600">
-                Campaign: {diagnosticCampaign?.subject?.slice(0, 30)}...
-              </span>
-            </div>
-
-            {diagnostics.map((d) => {
-              const statusColor =
-                d.status === 'ok'
-                  ? 'text-green-400 border-green-900/50 bg-green-950/30'
-                  : d.status === 'skipped'
-                  ? 'text-yellow-400 border-yellow-900/50 bg-yellow-950/30'
-                  : 'text-red-400 border-red-900/50 bg-red-950/30';
-
-              const statusIcon =
-                d.status === 'ok' ? '✓' : d.status === 'skipped' ? '⊘' : '✗';
-
-              return (
-                <div
-                  key={d.provider}
-                  className={`border rounded-lg p-3 space-y-2 ${statusColor}`}
-                >
-                  {/* Provider header */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">
-                      {statusIcon} {d.provider}
-                    </span>
-                    <span className="text-[10px] uppercase font-bold">
-                      {d.status}
-                    </span>
-                  </div>
-
-                  {/* Stats */}
-                  <div className="flex gap-3 text-[11px]">
-                    <span className="text-zinc-400">
-                      Assigned: <span className="text-zinc-300">{d.assigned}</span>
-                    </span>
-                    {d.sent > 0 && (
-                      <span className="text-green-400">Sent: {d.sent}</span>
-                    )}
-                    {d.failed > 0 && (
-                      <span className="text-red-400">Failed: {d.failed}</span>
-                    )}
-                    {d.skipped > 0 && (
-                      <span className="text-yellow-400">Skipped: {d.skipped}</span>
-                    )}
-                  </div>
-
-                  {/* Diagnosis */}
-                  {d.reason && (
-                    <div className="bg-black/30 rounded px-2 py-1.5">
-                      <p className="text-[11px] font-medium text-zinc-300">
-                        Diagnosis: {d.reason}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Raw errors */}
-                  {d.errors.length > 0 && (
-                    <div className="space-y-0.5">
-                      <p className="text-[10px] text-zinc-500 font-medium">Error details:</p>
-                      {d.errors.slice(0, 3).map((err, i) => (
-                        <p key={i} className="text-[10px] text-zinc-500 break-words font-mono">
-                          {err.slice(0, 150)}
-                        </p>
-                      ))}
-                      {d.errors.length > 3 && (
-                        <p className="text-[10px] text-zinc-600">
-                          +{d.errors.length - 3} more errors
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* Summary */}
-            <div className="border-t border-zinc-800 pt-2 text-[11px] text-zinc-500">
-              <p>
-                Total: {diagnostics.reduce((s, d) => s + d.sent, 0)} sent,{' '}
-                {diagnostics.reduce((s, d) => s + d.failed, 0)} failed,{' '}
-                {diagnostics.reduce((s, d) => s + d.skipped, 0)} skipped
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-      </div>{/* End flex container */}
+      </div>
 
       {/* Toast */}
       {toast && (
