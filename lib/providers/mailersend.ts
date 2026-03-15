@@ -21,7 +21,7 @@ export function createMailerSendProvider(): EmailProvider | null {
 
   return {
     name: 'mailersend',
-    tier: 'untested',
+    tier: 'proven',
     dailyLimit,
     batchSize: 10,
     async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {

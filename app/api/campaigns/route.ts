@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { parseEmailsFromCSV } from '@/lib/csv-parser';
-import { getTotalDailyLimit, getProviders } from '@/lib/providers';
+import { getTotalDailyLimit, getProviders, assignProviderSegments } from '@/lib/providers';
 
 // GET /api/campaigns — list recent campaigns with recipient stats
 export async function GET() {
@@ -19,6 +19,7 @@ export async function GET() {
 }
 
 // POST /api/campaigns — upload CSV + create campaign with recipients stored in DB.
+// Assigns each recipient a fixed provider at upload time (deterministic segments).
 // Does NOT start sending — user triggers daily batches via POST /api/campaigns/[id]/send-batch.
 export async function POST(req: NextRequest) {
   try {
@@ -59,6 +60,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Assign provider segments — each provider gets a fixed slice of the list
+    const segments = assignProviderSegments(emails.length, providers);
+
     // Create campaign
     const campaign = await prisma.campaign.create({
       data: {
@@ -69,16 +73,24 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Bulk-insert recipients in chunks of 1000
+    // Bulk-insert recipients with pre-assigned providers
     const CHUNK_SIZE = 1000;
     for (let i = 0; i < emails.length; i += CHUNK_SIZE) {
       const chunk = emails.slice(i, i + CHUNK_SIZE);
       await prisma.recipient.createMany({
-        data: chunk.map((email) => ({
-          campaignId: campaign.id,
-          email,
-          status: 'pending',
-        })),
+        data: chunk.map((email, chunkIdx) => {
+          const globalIdx = i + chunkIdx;
+          // Find which provider segment this recipient belongs to
+          const segment = segments.find(
+            (s) => globalIdx >= s.startIndex && globalIdx < s.endIndex
+          );
+          return {
+            campaignId: campaign.id,
+            email,
+            status: 'pending',
+            provider: segment?.provider.name ?? providers[0].name,
+          };
+        }),
       });
     }
 
@@ -91,6 +103,10 @@ export async function POST(req: NextRequest) {
         dailyLimit,
         daysNeeded,
         providerCount: providers.length,
+        providerSegments: segments.map((s) => ({
+          provider: s.provider.name,
+          count: s.count,
+        })),
       },
       { status: 201 }
     );

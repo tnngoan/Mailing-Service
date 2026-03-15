@@ -42,7 +42,8 @@ export function getProviders(): EmailProvider[] {
   const providers = factories
     .map((fn) => fn())
     .filter((p): p is EmailProvider => p !== null)
-    .sort((a, b) => tierOrder[a.tier] - tierOrder[b.tier] || b.batchSize - a.batchSize || b.dailyLimit - a.dailyLimit);
+    // Proven first, then untested, then unreliable. Within same tier, biggest capacity first.
+    .sort((a, b) => tierOrder[a.tier] - tierOrder[b.tier] || b.dailyLimit - a.dailyLimit);
 
   if (providers.length === 0) {
     console.error('[providers] No email providers configured — set at least one API key');
@@ -128,10 +129,61 @@ export async function getRemainingDailyCapacity(): Promise<number> {
 }
 
 /**
- * Split an email list across providers proportional to their REMAINING
- * daily capacity. Providers that have hit their limit are excluded.
+ * Assign a fixed provider segment to all recipients in a campaign.
+ * Each provider gets a deterministic, non-overlapping slice of the
+ * full recipient list (sorted by id). This ensures a provider always
+ * handles the same set of addresses across daily batches.
  *
- * Must be called with today's capacities (auto-resets each day).
+ * Example with 1000 recipients and capacities [mailersend:1000, mailjet:200, ...]:
+ *   mailersend → recipients 1-690 (proportional to 1000/1450)
+ *   mailjet    → recipients 691-828
+ *   mailtrap   → recipients 829-932
+ *   sendgrid   → recipients 933-1000
+ *
+ * Returns the segment boundaries for reference.
+ */
+export interface ProviderSegment {
+  provider: EmailProvider;
+  startIndex: number;  // inclusive
+  endIndex: number;    // exclusive
+  count: number;
+}
+
+export function assignProviderSegments(
+  totalRecipients: number,
+  providers: EmailProvider[]
+): ProviderSegment[] {
+  if (providers.length === 0 || totalRecipients === 0) return [];
+
+  const totalLimit = providers.reduce((s, p) => s + p.dailyLimit, 0);
+  const segments: ProviderSegment[] = [];
+  let offset = 0;
+
+  for (let i = 0; i < providers.length; i++) {
+    const provider = providers[i];
+    const isLast = i === providers.length - 1;
+    const count = isLast
+      ? totalRecipients - offset
+      : Math.round((provider.dailyLimit / totalLimit) * totalRecipients);
+
+    if (count > 0) {
+      segments.push({
+        provider,
+        startIndex: offset,
+        endIndex: offset + count,
+        count,
+      });
+      offset += count;
+    }
+  }
+
+  return segments;
+}
+
+/**
+ * Pick today's batch from pre-assigned provider segments.
+ * Only takes up to each provider's remaining daily capacity.
+ * Providers that have hit their limit are skipped entirely.
  */
 export function allocateEmailsWithCapacity(
   emails: string[],
@@ -153,7 +205,7 @@ export function allocateEmailsWithCapacity(
     const { provider, remaining } = available[i];
     const isLast = i === available.length - 1;
 
-    // Proportional to remaining capacity, but never exceed provider's remaining limit
+    // Proportional to remaining capacity, capped at provider's remaining limit
     const proportional = isLast
       ? toAllocate - offset
       : Math.round((remaining / totalRemaining) * toAllocate);

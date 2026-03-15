@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { prisma } from '@/lib/prisma';
-import { getProviders, getProviderCapacities, allocateEmailsWithCapacity } from '@/lib/providers';
+import { getProviders, getProviderCapacities } from '@/lib/providers';
 import { processBatch } from '@/lib/worker';
 
 // POST /api/campaigns/:id/send-batch — trigger today's daily batch
+// Respects pre-assigned providers — each recipient already has a fixed provider
+// from upload time. Only sends up to each provider's remaining daily capacity.
 export async function POST(
   _req: NextRequest,
   { params }: { params: { id: string } }
@@ -44,6 +46,7 @@ export async function POST(
 
     // Check today's remaining capacity per provider
     const capacities = await getProviderCapacities();
+    const capacityMap = new Map(capacities.map((c) => [c.provider.name, c]));
     const totalRemaining = capacities.reduce((s, c) => s + c.remaining, 0);
 
     if (totalRemaining === 0) {
@@ -56,12 +59,14 @@ export async function POST(
       );
     }
 
-    // Count pending recipients
-    const pendingCount = await prisma.recipient.count({
+    // Count pending recipients per provider (using pre-assigned providers)
+    const pendingByProvider = await prisma.recipient.groupBy({
+      by: ['provider'],
       where: { campaignId: id, status: 'pending' },
+      _count: true,
     });
 
-    if (pendingCount === 0) {
+    if (pendingByProvider.length === 0) {
       await prisma.campaign.update({
         where: { id },
         data: { status: 'completed' },
@@ -69,49 +74,54 @@ export async function POST(
       return NextResponse.json({ error: 'No pending recipients left' }, { status: 400 });
     }
 
-    const batchSize = Math.min(pendingCount, totalRemaining);
-
+    // Determine batch day
     const lastBatch = await prisma.recipient.aggregate({
       where: { campaignId: id, batchDay: { not: null } },
       _max: { batchDay: true },
     });
     const batchDay = (lastBatch._max.batchDay ?? 0) + 1;
 
-    // Select pending recipients for this batch
-    const pendingRecipients = await prisma.recipient.findMany({
-      where: { campaignId: id, status: 'pending' },
-      orderBy: { id: 'asc' },
-      take: batchSize,
-      select: { id: true, email: true },
-    });
+    // For each provider, take up to its remaining capacity from its own pool
+    let totalBatchSize = 0;
+    const providerBreakdown: { provider: string; count: number }[] = [];
 
-    // Allocate emails using remaining capacity (not full daily limits)
-    const emailList = pendingRecipients.map((r) => r.email);
-    const allocations = allocateEmailsWithCapacity(emailList, capacities);
+    for (const group of pendingByProvider) {
+      const providerName = group.provider;
+      if (!providerName) continue;
 
-    if (allocations.length === 0) {
+      const capacity = capacityMap.get(providerName);
+      if (!capacity || capacity.remaining === 0) {
+        console.log(`[send-batch] ${providerName}: at daily limit, skipping its recipients`);
+        continue;
+      }
+
+      const takeCount = Math.min(group._count, capacity.remaining);
+
+      // Assign batchDay to this provider's pending recipients (up to capacity)
+      const recipientIds = await prisma.recipient.findMany({
+        where: { campaignId: id, status: 'pending', provider: providerName },
+        orderBy: { id: 'asc' },
+        take: takeCount,
+        select: { id: true },
+      });
+
+      if (recipientIds.length > 0) {
+        await prisma.recipient.updateMany({
+          where: { id: { in: recipientIds.map((r) => r.id) } },
+          data: { batchDay },
+        });
+
+        totalBatchSize += recipientIds.length;
+        providerBreakdown.push({ provider: providerName, count: recipientIds.length });
+      }
+    }
+
+    if (totalBatchSize === 0) {
       return NextResponse.json(
-        { error: 'No provider capacity available for allocation' },
+        { error: 'No capacity available for any provider with pending recipients. Try again tomorrow.' },
         { status: 429 }
       );
     }
-
-    // Assign provider and batchDay to each recipient
-    let offset = 0;
-    for (const alloc of allocations) {
-      const recipientIds = pendingRecipients
-        .slice(offset, offset + alloc.emails.length)
-        .map((r) => r.id);
-
-      await prisma.recipient.updateMany({
-        where: { id: { in: recipientIds } },
-        data: { provider: alloc.provider.name, batchDay },
-      });
-
-      offset += alloc.emails.length;
-    }
-
-    const actualBatchSize = allocations.reduce((s, a) => s + a.emails.length, 0);
 
     // Update campaign status to sending
     await prisma.campaign.update({
@@ -126,11 +136,12 @@ export async function POST(
       })
     );
 
-    const remainingAfter = pendingCount - actualBatchSize;
+    const totalPending = pendingByProvider.reduce((s, g) => s + g._count, 0);
+    const remainingAfter = totalPending - totalBatchSize;
 
     return NextResponse.json({
       batchDay,
-      batchSize: actualBatchSize,
+      batchSize: totalBatchSize,
       remainingAfter,
       dailyCapacityUsed: capacities.map((c) => ({
         provider: c.provider.name,
@@ -138,10 +149,7 @@ export async function POST(
         dailyLimit: c.dailyLimit,
         remaining: c.remaining,
       })),
-      providerBreakdown: allocations.map((a) => ({
-        provider: a.provider.name,
-        count: a.emails.length,
-      })),
+      providerBreakdown,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
