@@ -14,7 +14,7 @@ export function createAhaSendProvider(): EmailProvider | null {
 
   return {
     name: 'ahasend',
-    tier: 'untested',
+    tier: 'proven',
     dailyLimit,
     batchSize: 5,
     async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {

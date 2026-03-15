@@ -26,7 +26,7 @@ export type { EmailProvider, SendResult } from './types';
 /** Returns all providers that have valid API keys configured, sorted by tier then speed. */
 export function getProviders(): EmailProvider[] {
   const factories = [
-    createMailerSendProvider,  // 1000/day
+    createMailerSendProvider,  // 500/day (trial: 500 unique recipients)
     createSendPulseProvider,   // 400/day
     createBrevoProvider,       // 300/day
     createSmtp2goProvider,     // 200/day
@@ -187,6 +187,68 @@ export function assignProviderSegments(
  * Only takes up to each provider's remaining daily capacity.
  * Providers that have hit their limit are skipped entirely.
  */
+/**
+ * Reassign pending recipients from one provider to all other available providers.
+ * Used when a provider is broken/exhausted and its pending emails are stuck.
+ * Returns the count of reassigned recipients per target provider.
+ */
+export async function reassignProviderEmails(
+  campaignId: number,
+  fromProvider: string
+): Promise<{ reassigned: number; breakdown: { provider: string; count: number }[] }> {
+  const { prisma } = await import('@/lib/prisma');
+
+  const providers = getProviders().filter((p) => p.name !== fromProvider);
+  if (providers.length === 0) {
+    return { reassigned: 0, breakdown: [] };
+  }
+
+  // Count pending recipients assigned to the broken provider
+  const pendingCount = await prisma.recipient.count({
+    where: { campaignId, provider: fromProvider, status: 'pending' },
+  });
+
+  if (pendingCount === 0) {
+    return { reassigned: 0, breakdown: [] };
+  }
+
+  // Get IDs of all pending recipients for this provider
+  const pendingRecipients = await prisma.recipient.findMany({
+    where: { campaignId, provider: fromProvider, status: 'pending' },
+    select: { id: true },
+    orderBy: { id: 'asc' },
+  });
+
+  // Distribute proportionally across remaining providers by dailyLimit
+  const totalLimit = providers.reduce((s, p) => s + p.dailyLimit, 0);
+  const breakdown: { provider: string; count: number }[] = [];
+  let offset = 0;
+
+  for (let i = 0; i < providers.length; i++) {
+    const provider = providers[i];
+    const isLast = i === providers.length - 1;
+    const count = isLast
+      ? pendingRecipients.length - offset
+      : Math.round((provider.dailyLimit / totalLimit) * pendingRecipients.length);
+
+    if (count > 0) {
+      const ids = pendingRecipients.slice(offset, offset + count).map((r) => r.id);
+      await prisma.recipient.updateMany({
+        where: { id: { in: ids } },
+        data: { provider: provider.name },
+      });
+      breakdown.push({ provider: provider.name, count });
+      offset += count;
+    }
+  }
+
+  console.log(
+    `[reassign] Moved ${offset} recipients from ${fromProvider} → ${breakdown.map((b) => `${b.provider}(${b.count})`).join(', ')}`
+  );
+
+  return { reassigned: offset, breakdown };
+}
+
 export function allocateEmailsWithCapacity(
   emails: string[],
   capacities: ProviderCapacity[]

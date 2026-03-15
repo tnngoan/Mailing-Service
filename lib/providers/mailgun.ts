@@ -17,7 +17,7 @@ export function createMailgunProvider(): EmailProvider | null {
 
   return {
     name: 'mailgun',
-    tier: 'untested',
+    tier: 'proven',
     dailyLimit,
     batchSize: 50, // Mailgun supports up to 1000 recipients per call
     async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {

@@ -73,6 +73,7 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
   const [sendingBatchId, setSendingBatchId] = useState<number | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
+  const [reassigning, setReassigning] = useState<string | null>(null);
 
   const hasSending = campaigns.some((c) => c.status === 'sending');
 
@@ -174,6 +175,37 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
       onToast('Network error starting batch', 'error');
     } finally {
       setSendingBatchId(null);
+    }
+  }
+
+  async function handleReassign(campaignId: number, fromProvider: string) {
+    setReassigning(fromProvider);
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/reassign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromProvider }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        onToast(data.error ?? 'Failed to reassign', 'error');
+        return;
+      }
+      if (data.reassigned === 0) {
+        onToast('No pending emails to reassign', 'error');
+        return;
+      }
+      const targets = data.breakdown
+        .map((b: { provider: string; count: number }) => `${b.provider}: ${b.count}`)
+        .join(', ');
+      onToast(`Reassigned ${data.reassigned} emails from ${fromProvider} → ${targets}`, 'success');
+      await fetchDetail(campaignId);
+      const listRes = await fetch('/api/campaigns');
+      if (listRes.ok) onUpdate(await listRes.json());
+    } catch {
+      onToast('Network error reassigning emails', 'error');
+    } finally {
+      setReassigning(null);
     }
   }
 
@@ -350,11 +382,13 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
                               <th className="text-right py-1.5 px-2 font-medium">Failed</th>
                               <th className="text-right py-1.5 px-2 font-medium">Pending</th>
                               <th className="text-right py-1.5 px-2 font-medium">Progress</th>
+                              <th className="text-right py-1.5 px-2 font-medium"></th>
                             </tr>
                           </thead>
                           <tbody>
                             {detail.providerAssignments.map((a) => {
                               const pct = a.total > 0 ? Math.round((a.sent / a.total) * 100) : 0;
+                              const isStuck = a.pending > 0 && a.failed > 0 && pct < 10;
                               return (
                                 <tr key={a.provider} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                                   <td className="py-1.5 px-2 text-zinc-300 font-medium">{a.provider}</td>
@@ -369,6 +403,17 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
                                       </div>
                                       <span className="text-zinc-500 w-8 text-right">{pct}%</span>
                                     </div>
+                                  </td>
+                                  <td className="py-1.5 px-2 text-right">
+                                    {isStuck && (
+                                      <button
+                                        onClick={() => handleReassign(c.id, a.provider)}
+                                        disabled={reassigning === a.provider}
+                                        className="text-[10px] px-2 py-0.5 rounded bg-orange-600/30 text-orange-400 border border-orange-600/40 hover:bg-orange-600/50 disabled:opacity-40"
+                                      >
+                                        {reassigning === a.provider ? 'Moving...' : 'Reassign'}
+                                      </button>
+                                    )}
                                   </td>
                                 </tr>
                               );
