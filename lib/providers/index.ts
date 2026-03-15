@@ -8,7 +8,8 @@
  */
 
 import type { EmailProvider, SendResult } from './types';
-import { createSendPulseProvider } from './sendpulse';   // 400/day free
+import { createMailerSendProvider } from './mailersend';   // 1000/day free
+import { createSendPulseProvider } from './sendpulse';     // 400/day free
 import { createBrevoProvider } from './brevo';             // 300/day free
 import { createSmtp2goProvider } from './smtp2go';         // 200/day free
 import { createMailjetProvider } from './mailjet';         // 200/day free
@@ -26,6 +27,7 @@ export function getProviders(): EmailProvider[] {
 
   // Ordered by free-tier daily limit (highest first)
   const factories = [
+    createMailerSendProvider,  // 1000/day
     createSendPulseProvider,   // 400/day
     createBrevoProvider,       // 300/day
     createSmtp2goProvider,     // 200/day
