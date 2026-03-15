@@ -31,6 +31,9 @@ function countEmailsInCSV(text: string): number {
 interface ProviderInfo {
   name: string;
   dailyLimit: number;
+  usedToday: number;
+  remaining: number;
+  tier: string;
 }
 
 export default function Dashboard() {
@@ -43,6 +46,7 @@ export default function Dashboard() {
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [totalDailyLimit, setTotalDailyLimit] = useState<number>(0);
+  const [totalRemaining, setTotalRemaining] = useState<number>(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -68,6 +72,7 @@ export default function Dashboard() {
       .then((data) => {
         setProviders(data.providers ?? []);
         setTotalDailyLimit(data.totalDailyLimit ?? 0);
+        setTotalRemaining(data.totalRemaining ?? data.totalDailyLimit ?? 0);
       })
       .catch(() => {});
   }, []);
@@ -159,21 +164,38 @@ export default function Dashboard() {
 
       {/* Provider capacity banner */}
       {providers.length > 0 && (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 mb-4 flex items-center justify-between">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 mb-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-500">Today&apos;s capacity</span>
+            <span className={`text-xs font-medium ${totalRemaining > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {totalRemaining > 0
+                ? `${totalRemaining.toLocaleString()} remaining`
+                : 'All limits reached — try tomorrow'}
+            </span>
+          </div>
           <div className="flex items-center gap-2 text-xs text-zinc-400 flex-wrap">
-            <span className="text-zinc-500">Providers:</span>
             {providers.map((p) => (
               <span
                 key={p.name}
-                className="bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-zinc-300"
+                className={`border rounded px-2 py-0.5 ${
+                  p.remaining === 0
+                    ? 'bg-red-950/50 border-red-900/50 text-red-400'
+                    : p.usedToday > 0
+                    ? 'bg-yellow-950/50 border-yellow-900/50 text-yellow-300'
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-300'
+                }`}
               >
-                {p.name} <span className="text-zinc-500">{p.dailyLimit}/day</span>
+                {p.name}{' '}
+                <span className={p.remaining === 0 ? 'text-red-500' : 'text-zinc-500'}>
+                  {p.remaining === 0
+                    ? `${p.dailyLimit}/${p.dailyLimit} used`
+                    : p.usedToday > 0
+                    ? `${p.remaining} left`
+                    : `${p.dailyLimit}/day`}
+                </span>
               </span>
             ))}
           </div>
-          <span className="text-xs text-emerald-400 font-medium whitespace-nowrap ml-2">
-            {totalDailyLimit.toLocaleString()}/day total
-          </span>
         </div>
       )}
 

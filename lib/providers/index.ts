@@ -1,10 +1,10 @@
 /**
  * Provider registry — auto-detects which email providers are configured
  * (have API keys set) and distributes emails across them proportional
- * to each provider's daily limit.
+ * to each provider's remaining daily capacity.
  *
- * Providers are sorted by daily limit (highest first) so the biggest
- * capacity providers handle the bulk of the work.
+ * Daily usage is tracked via the Recipient table — counting emails
+ * sent today per provider. Resets automatically each calendar day.
  */
 
 import type { EmailProvider, SendResult } from './types';
@@ -22,10 +22,8 @@ import { createResendProvider } from './resend';           // 100/day free
 
 export type { EmailProvider, SendResult } from './types';
 
-/** Returns all providers that have valid API keys configured, sorted by daily limit desc. */
+/** Returns all providers that have valid API keys configured, sorted by tier then speed. */
 export function getProviders(): EmailProvider[] {
-
-  // Ordered by free-tier daily limit (highest first)
   const factories = [
     createMailerSendProvider,  // 1000/day
     createSendPulseProvider,   // 400/day
@@ -44,7 +42,6 @@ export function getProviders(): EmailProvider[] {
   const providers = factories
     .map((fn) => fn())
     .filter((p): p is EmailProvider => p !== null)
-    // Proven first, then untested, then unreliable. Within same tier, fastest (biggest batch) first.
     .sort((a, b) => tierOrder[a.tier] - tierOrder[b.tier] || b.batchSize - a.batchSize || b.dailyLimit - a.dailyLimit);
 
   if (providers.length === 0) {
@@ -68,31 +65,100 @@ export interface ProviderAllocation {
   emails: string[];
 }
 
+export interface ProviderCapacity {
+  provider: EmailProvider;
+  dailyLimit: number;
+  usedToday: number;
+  remaining: number;
+}
+
 /**
- * Split an email list across providers proportional to their daily limits.
- *
- * Example: 1,350 emails with all 8 providers configured
- *  → SendPulse gets ~400, Brevo gets ~300, SMTP2GO gets ~200, etc.
+ * Query the DB for how many emails each provider has already sent today.
+ * Returns providers with their remaining capacity, excluding exhausted ones.
  */
-export function allocateEmails(emails: string[]): ProviderAllocation[] {
+export async function getProviderCapacities(): Promise<ProviderCapacity[]> {
+  // Lazy import to avoid circular deps
+  const { prisma } = await import('@/lib/prisma');
+
   const providers = getProviders();
-  if (providers.length === 0) return [];
-  if (providers.length === 1) {
-    return [{ provider: providers[0], emails }];
+
+  // Get start of today (UTC)
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+
+  // Count emails sent today per provider (status = 'sent' and sentAt >= today)
+  const usageCounts = await prisma.recipient.groupBy({
+    by: ['provider'],
+    where: {
+      status: 'sent',
+      sentAt: { gte: todayStart },
+    },
+    _count: true,
+  });
+
+  const usageMap = new Map<string, number>();
+  for (const row of usageCounts) {
+    if (row.provider) {
+      usageMap.set(row.provider, row._count);
+    }
   }
 
-  const totalLimit = providers.reduce((s, p) => s + p.dailyLimit, 0);
+  const capacities: ProviderCapacity[] = [];
+  for (const provider of providers) {
+    const usedToday = usageMap.get(provider.name) ?? 0;
+    const remaining = Math.max(0, provider.dailyLimit - usedToday);
+    capacities.push({ provider, dailyLimit: provider.dailyLimit, usedToday, remaining });
+
+    if (remaining === 0) {
+      console.log(`[providers] ${provider.name}: daily limit reached (${usedToday}/${provider.dailyLimit}) — skipping`);
+    } else {
+      console.log(`[providers] ${provider.name}: ${usedToday}/${provider.dailyLimit} used, ${remaining} remaining`);
+    }
+  }
+
+  return capacities;
+}
+
+/**
+ * Get total remaining capacity across all providers for today.
+ */
+export async function getRemainingDailyCapacity(): Promise<number> {
+  const capacities = await getProviderCapacities();
+  return capacities.reduce((sum, c) => sum + c.remaining, 0);
+}
+
+/**
+ * Split an email list across providers proportional to their REMAINING
+ * daily capacity. Providers that have hit their limit are excluded.
+ *
+ * Must be called with today's capacities (auto-resets each day).
+ */
+export function allocateEmailsWithCapacity(
+  emails: string[],
+  capacities: ProviderCapacity[]
+): ProviderAllocation[] {
+  // Filter out exhausted providers
+  const available = capacities.filter((c) => c.remaining > 0);
+  if (available.length === 0) return [];
+
+  const totalRemaining = available.reduce((s, c) => s + c.remaining, 0);
+  const toAllocate = Math.min(emails.length, totalRemaining);
+
+  if (toAllocate === 0) return [];
+
   const allocations: ProviderAllocation[] = [];
   let offset = 0;
 
-  for (let i = 0; i < providers.length; i++) {
-    const provider = providers[i];
-    const isLast = i === providers.length - 1;
+  for (let i = 0; i < available.length; i++) {
+    const { provider, remaining } = available[i];
+    const isLast = i === available.length - 1;
 
-    // Last provider gets whatever remains (avoids rounding issues)
-    const count = isLast
-      ? emails.length - offset
-      : Math.round((provider.dailyLimit / totalLimit) * emails.length);
+    // Proportional to remaining capacity, but never exceed provider's remaining limit
+    const proportional = isLast
+      ? toAllocate - offset
+      : Math.round((remaining / totalRemaining) * toAllocate);
+
+    const count = Math.min(proportional, remaining);
 
     if (count > 0) {
       allocations.push({
