@@ -47,6 +47,11 @@ export default function Dashboard() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [totalDailyLimit, setTotalDailyLimit] = useState<number>(0);
   const [totalRemaining, setTotalRemaining] = useState<number>(0);
+  const [capacityData, setCapacityData] = useState<{
+    summary: { totalProviders: number; availableProviders: number; exhaustedProviders: number; totalDailyLimit: number; totalSentToday: number; totalRemaining: number; capacityPercent: number };
+    providers: { provider: string; tier: string; configuredLimit: number; sentToday: number; providerReported: number | null; remaining: number; source: string; status: string; error?: string }[];
+  } | null>(null);
+  const [capacityLoading, setCapacityLoading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -64,8 +69,24 @@ export default function Dashboard() {
       .catch(() => {});
   }
 
+  function refreshCapacity() {
+    setCapacityLoading(true);
+    fetch('/api/capacity')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.providers) {
+          setCapacityData(data);
+          setTotalRemaining(data.summary?.totalRemaining ?? 0);
+          setTotalDailyLimit(data.summary?.totalDailyLimit ?? 0);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setCapacityLoading(false));
+  }
+
   useEffect(() => {
     refreshCampaigns();
+    refreshCapacity();
 
     fetch('/api/providers')
       .then((r) => r.json())
@@ -187,42 +208,128 @@ export default function Dashboard() {
       {/* Left column — main content */}
       <div className={hasDiagnostics ? 'flex-1 min-w-0' : 'max-w-3xl mx-auto w-full'}>
 
-      {/* Provider capacity banner */}
-      {providers.length > 0 && (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 mb-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-zinc-500">Today&apos;s capacity</span>
-            <span className={`text-xs font-medium ${totalRemaining > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {totalRemaining > 0
-                ? `${totalRemaining.toLocaleString()} remaining`
-                : 'All limits reached — try tomorrow'}
-            </span>
+      {/* Capacity dashboard */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 mb-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Provider Capacity</span>
+          <button
+            onClick={refreshCapacity}
+            disabled={capacityLoading}
+            className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-40"
+          >
+            {capacityLoading ? 'Checking...' : 'Refresh'}
+          </button>
+        </div>
+
+        {/* Summary bar */}
+        {capacityData && (
+          <div className="flex items-center gap-4 text-xs">
+            <div className="flex-1">
+              <div className="flex justify-between mb-1">
+                <span className="text-zinc-400">
+                  {capacityData.summary.totalSentToday.toLocaleString()} sent today
+                </span>
+                <span className={capacityData.summary.totalRemaining > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                  {capacityData.summary.totalRemaining.toLocaleString()} remaining
+                </span>
+              </div>
+              <div className="h-2 bg-zinc-800 rounded-full overflow-hidden flex">
+                <div
+                  className="h-full bg-emerald-500 transition-all"
+                  style={{ width: `${100 - (capacityData.summary.capacityPercent)}%` }}
+                />
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="text-lg font-bold text-zinc-100">{capacityData.summary.capacityPercent}%</p>
+              <p className="text-[10px] text-zinc-500">available</p>
+            </div>
           </div>
+        )}
+
+        {/* Provider table */}
+        {capacityData && capacityData.providers.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-zinc-500 border-b border-zinc-800">
+                  <th className="text-left py-1.5 px-2 font-medium">#</th>
+                  <th className="text-left py-1.5 px-2 font-medium">Provider</th>
+                  <th className="text-right py-1.5 px-2 font-medium">Limit</th>
+                  <th className="text-right py-1.5 px-2 font-medium">Sent</th>
+                  <th className="text-right py-1.5 px-2 font-medium">Remaining</th>
+                  <th className="text-right py-1.5 px-2 font-medium">Capacity</th>
+                  <th className="text-center py-1.5 px-2 font-medium">Source</th>
+                  <th className="text-center py-1.5 px-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {capacityData.providers.map((p, i) => {
+                  const pct = p.configuredLimit > 0 ? Math.round((p.remaining / p.configuredLimit) * 100) : 0;
+                  const statusColor = p.status === 'available'
+                    ? 'text-green-400 bg-green-950/50'
+                    : p.status === 'exhausted'
+                    ? 'text-red-400 bg-red-950/50'
+                    : 'text-yellow-400 bg-yellow-950/50';
+
+                  return (
+                    <tr key={p.provider} className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
+                      <td className="py-1.5 px-2 text-zinc-600">{i + 1}</td>
+                      <td className="py-1.5 px-2">
+                        <span className="text-zinc-200 font-medium">{p.provider}</span>
+                        {p.tier === 'proven' && (
+                          <span className="ml-1.5 text-[9px] text-green-600">PROVEN</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 px-2 text-right text-zinc-400">{p.configuredLimit.toLocaleString()}</td>
+                      <td className="py-1.5 px-2 text-right text-zinc-300">{p.sentToday.toLocaleString()}</td>
+                      <td className={`py-1.5 px-2 text-right font-medium ${p.remaining > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {p.remaining.toLocaleString()}
+                      </td>
+                      <td className="py-1.5 px-2 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <div className="w-12 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${pct > 50 ? 'bg-green-500' : pct > 0 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="text-zinc-500 w-7 text-right">{pct}%</span>
+                        </div>
+                      </td>
+                      <td className="py-1.5 px-2 text-center">
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                          p.source === 'api' ? 'bg-blue-950/50 text-blue-400' :
+                          p.source === 'db' ? 'bg-zinc-800 text-zinc-400' :
+                          'bg-zinc-800 text-zinc-600'
+                        }`}>
+                          {p.source}
+                        </span>
+                      </td>
+                      <td className="py-1.5 px-2 text-center">
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded ${statusColor}`}>
+                          {p.status}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Fallback: simple provider tags if capacity not loaded yet */}
+        {!capacityData && providers.length > 0 && (
           <div className="flex items-center gap-2 text-xs text-zinc-400 flex-wrap">
             {providers.map((p) => (
-              <span
-                key={p.name}
-                className={`border rounded px-2 py-0.5 ${
-                  p.remaining === 0
-                    ? 'bg-red-950/50 border-red-900/50 text-red-400'
-                    : p.usedToday > 0
-                    ? 'bg-yellow-950/50 border-yellow-900/50 text-yellow-300'
-                    : 'bg-zinc-800 border-zinc-700 text-zinc-300'
-                }`}
-              >
-                {p.name}{' '}
-                <span className={p.remaining === 0 ? 'text-red-500' : 'text-zinc-500'}>
-                  {p.remaining === 0
-                    ? `${p.dailyLimit}/${p.dailyLimit} used`
-                    : p.usedToday > 0
-                    ? `${p.remaining} left`
-                    : `${p.dailyLimit}/day`}
-                </span>
+              <span key={p.name} className="bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-zinc-300">
+                {p.name} <span className="text-zinc-500">{p.dailyLimit}/day</span>
               </span>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Compose + Send */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 mb-6 space-y-5">
