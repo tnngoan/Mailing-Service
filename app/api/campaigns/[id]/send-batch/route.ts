@@ -23,10 +23,26 @@ export async function POST(
     }
 
     if (campaign.status === 'sending') {
-      return NextResponse.json(
-        { error: 'A batch is already being sent for this campaign' },
-        { status: 409 }
-      );
+      // Check if it's been stuck for more than 5 minutes — auto-recover
+      const updatedAt = new Date(campaign.updatedAt).getTime();
+      const stuckMinutes = (Date.now() - updatedAt) / 60000;
+      if (stuckMinutes > 5) {
+        console.warn(`[send-batch] Campaign ${id} stuck in "sending" for ${stuckMinutes.toFixed(0)}m — resetting to paused`);
+        await prisma.campaign.update({
+          where: { id },
+          data: { status: 'paused' },
+        });
+        // Reset any recipients still pending with a batchDay (stale assignment)
+        await prisma.recipient.updateMany({
+          where: { campaignId: id, status: 'pending', batchDay: { not: null } },
+          data: { batchDay: null },
+        });
+      } else {
+        return NextResponse.json(
+          { error: 'A batch is already being sent for this campaign' },
+          { status: 409 }
+        );
+      }
     }
 
     if (campaign.status === 'completed') {

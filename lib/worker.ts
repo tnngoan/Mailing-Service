@@ -17,6 +17,7 @@ import { getProviders, type EmailProvider } from './providers';
 
 const BATCH_DELAY_MS = 1500;
 const CONSECUTIVE_FAIL_THRESHOLD = 10;
+const WORKER_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes hard timeout
 
 const SENDER_EMAIL = (process.env.SENDER_EMAIL ?? '').trim();
 const SENDER_NAME = (process.env.SENDER_NAME ?? 'Newsletter').trim();
@@ -73,6 +74,11 @@ function diagnoseErrors(errors: string[]): string {
  */
 export async function processBatch(campaignId: number, batchDay: number): Promise<void> {
   const diagnostics: ProviderDiagnostic[] = [];
+  const startTime = Date.now();
+
+  function isTimedOut(): boolean {
+    return Date.now() - startTime >= WORKER_TIMEOUT_MS;
+  }
 
   try {
     const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
@@ -141,6 +147,20 @@ export async function processBatch(campaignId: number, batchDay: number): Promis
 
       // Send in provider-sized batches
       for (let i = 0; i < recipients.length; i += provider.batchSize) {
+        if (isTimedOut()) {
+          console.warn(`[worker] [${providerName}] 3-minute timeout reached — returning remaining to pool`);
+          const remaining = recipients.slice(i);
+          diag.skipped += remaining.length;
+          diag.status = 'skipped';
+          diag.reason = 'Worker timeout (3 min) — will continue in next batch';
+          await prisma.recipient.updateMany({
+            where: { id: { in: remaining.map((r) => r.id) } },
+            data: { batchDay: null },
+          });
+          skipProvider = true;
+          break;
+        }
+
         if (skipProvider) {
           // Return remaining to pending pool
           const remaining = recipients.slice(i);
