@@ -7,10 +7,12 @@ export function createSendGridProvider(): EmailProvider | null {
 
   sgMail.setApiKey(apiKey);
 
+  const dailyLimit = parseInt(process.env.SENDGRID_DAILY_LIMIT ?? '2000', 10) || 2000;
+
   return {
     name: 'sendgrid',
     tier: 'proven',
-    dailyLimit: Infinity,
+    dailyLimit,
     batchSize: 500, // well under SendGrid's 1000 personalizations limit
     async sendBatch(emails, subject, htmlBody, textBody, fromEmail, fromName) {
       try {

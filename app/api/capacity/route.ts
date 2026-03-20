@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { measureCapacity } from '@/lib/capacity-checker';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 // GET /api/capacity — real-time provider capacity measurement
 export async function GET() {

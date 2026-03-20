@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { parseEmailsFromCSV } from '@/lib/csv-parser';
 import { getTotalDailyLimit, getProviders, assignProviderSegments } from '@/lib/providers';
+import { bulkUpsertContacts, bulkInsertRecipients } from '@/lib/bulk-sql';
+
+export const maxDuration = 60;
 
 // GET /api/campaigns — list recent campaigns with recipient stats
 export async function GET() {
@@ -19,8 +22,6 @@ export async function GET() {
 }
 
 // POST /api/campaigns — upload CSV + create campaign with recipients stored in DB.
-// Assigns each recipient a fixed provider at upload time (deterministic segments).
-// Does NOT start sending — user triggers daily batches via POST /api/campaigns/[id]/send-batch.
 export async function POST(req: NextRequest) {
   try {
     const providers = getProviders();
@@ -60,30 +61,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Upsert CSV emails into the master Contact table
-    const CHUNK_SIZE = 1000;
-    for (let i = 0; i < csvEmails.length; i += CHUNK_SIZE) {
-      const chunk = csvEmails.slice(i, i + CHUNK_SIZE);
-      await prisma.$transaction(
-        chunk.map((email) =>
-          prisma.contact.upsert({
-            where: { email },
-            create: { email, source: 'csv-upload' },
-            update: {},
-          })
-        )
-      );
-    }
+    // Bulk-upsert CSV emails into Contact table (fast INSERT OR IGNORE)
+    await bulkUpsertContacts(csvEmails);
 
     // Get rest of contacts (not in CSV) for auto-include as lowest tier
     const allContacts = await prisma.contact.findMany({ select: { email: true } });
     const csvSet = new Set(csvEmails);
     const restEmails = allContacts.map((c) => c.email).filter((e) => !csvSet.has(e));
 
-    // Combined: CSV first (priority 1), rest of contacts (priority 2, auto-included)
+    const totalCount = csvEmails.length + restEmails.length;
     const allEmails = [...csvEmails, ...restEmails];
-    const totalCount = allEmails.length;
-
     const segments = assignProviderSegments(totalCount, providers);
 
     // Create campaign
@@ -96,27 +83,19 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Bulk-insert: CSV = priority 1, rest = priority 2 (autoIncluded)
-    for (let i = 0; i < allEmails.length; i += CHUNK_SIZE) {
-      const chunk = allEmails.slice(i, i + CHUNK_SIZE);
-      await prisma.recipient.createMany({
-        data: chunk.map((email, chunkIdx) => {
-          const globalIdx = i + chunkIdx;
-          const isCsv = globalIdx < csvEmails.length;
-          const segment = segments.find(
-            (s) => globalIdx >= s.startIndex && globalIdx < s.endIndex
-          );
-          return {
-            campaignId: campaign.id,
-            email,
-            status: 'pending',
-            provider: segment?.provider.name ?? providers[0].name,
-            priority: isCsv ? 1 : 2,
-            autoIncluded: !isCsv,
-          };
-        }),
-      });
-    }
+    // Build recipient rows: CSV = priority 1, rest = priority 2 (autoIncluded)
+    const recipients = allEmails.map((email, idx) => {
+      const isCsv = idx < csvEmails.length;
+      const segment = segments.find((s) => idx >= s.startIndex && idx < s.endIndex);
+      return {
+        email,
+        provider: segment?.provider.name ?? providers[0].name,
+        priority: isCsv ? 1 : 2,
+        autoIncluded: !isCsv,
+      };
+    });
+
+    await bulkInsertRecipients(campaign.id, recipients);
 
     const dailyLimit = getTotalDailyLimit();
     const daysNeeded = Math.ceil(totalCount / dailyLimit);
