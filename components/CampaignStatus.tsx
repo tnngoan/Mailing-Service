@@ -2,6 +2,11 @@
 
 import { useEffect, useState, useCallback } from 'react';
 
+// Safe number: guard against null/undefined from API responses
+function n(val: number | null | undefined): number {
+  return val ?? 0;
+}
+
 interface Campaign {
   id: number;
   subject: string;
@@ -172,7 +177,7 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
         .join(', ');
 
       onToast(
-        `Batch ${data.batchDay} started — sending ${data.batchSize.toLocaleString()} emails (${providers}). ${data.remainingAfter.toLocaleString()} left after this batch.`,
+        `Batch ${data.batchDay ?? '?'} started — sending ${n(data.batchSize).toLocaleString()} emails (${providers}). ${n(data.remainingAfter).toLocaleString()} left after this batch.`,
         'success'
       );
 
@@ -263,10 +268,13 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
       </h2>
       <div className="space-y-2">
         {campaigns.map((c) => {
-          const remaining = Math.max(0, c.totalRecipients - c.sentCount - c.failedCount);
-          const sentPct = c.totalRecipients > 0 ? (c.sentCount / c.totalRecipients) * 100 : 0;
-          const failedPct = c.totalRecipients > 0 ? (c.failedCount / c.totalRecipients) * 100 : 0;
-          const badge = statusBadge(c.status, c.failedCount);
+          const sent = n(c.sentCount);
+          const failed = n(c.failedCount);
+          const total = n(c.totalRecipients);
+          const remaining = Math.max(0, total - sent - failed);
+          const sentPct = total > 0 ? (sent / total) * 100 : 0;
+          const failedPct = total > 0 ? (failed / total) * 100 : 0;
+          const badge = statusBadge(c.status, failed);
           const canSendBatch = c.status === 'pending' || c.status === 'paused';
           const isExpanded = expandedId === c.id;
 
@@ -293,19 +301,19 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
               </div>
 
               {/* Progress */}
-              {c.totalRecipients > 0 && (
+              {total > 0 && (
                 <div className="space-y-1.5">
                   <div className="flex justify-between text-xs text-zinc-400">
                     <span>
-                      <span className="text-green-400">{c.sentCount.toLocaleString()} sent</span>
-                      {c.failedCount > 0 && (
-                        <span className="text-red-400 ml-2">{c.failedCount.toLocaleString()} failed</span>
+                      <span className="text-green-400">{sent.toLocaleString()} sent</span>
+                      {failed > 0 && (
+                        <span className="text-red-400 ml-2">{failed.toLocaleString()} failed</span>
                       )}
                       {remaining > 0 && (
                         <span className="text-zinc-500 ml-2">{remaining.toLocaleString()} pending</span>
                       )}
                     </span>
-                    <span>{c.totalRecipients.toLocaleString()} total</span>
+                    <span>{total.toLocaleString()} total</span>
                   </div>
 
                   <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden flex">
@@ -392,7 +400,7 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
                   {/* Schedule overview */}
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div className="bg-zinc-800 rounded-md px-2 py-2">
-                      <p className="text-lg font-bold text-zinc-100">{detail.dailyLimit.toLocaleString()}</p>
+                      <p className="text-lg font-bold text-zinc-100">{n(detail.dailyLimit).toLocaleString()}</p>
                       <p className="text-[10px] text-zinc-500 uppercase">per day</p>
                     </div>
                     <div className="bg-zinc-800 rounded-md px-2 py-2">

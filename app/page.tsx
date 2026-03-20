@@ -3,6 +3,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import CampaignStatus from '@/components/CampaignStatus';
 
+function n(val: number | null | undefined): number {
+  return val ?? 0;
+}
+
 interface Campaign {
   id: number;
   subject: string;
@@ -256,10 +260,10 @@ export default function Dashboard() {
             <div className="flex-1">
               <div className="flex justify-between mb-1">
                 <span className="text-zinc-400">
-                  {capacityData.summary.totalSentToday.toLocaleString()} sent today
+                  {n(capacityData.summary.totalSentToday).toLocaleString()} sent today
                 </span>
-                <span className={capacityData.summary.totalRemaining > 0 ? 'text-emerald-400' : 'text-red-400'}>
-                  {capacityData.summary.totalRemaining.toLocaleString()} remaining
+                <span className={n(capacityData.summary.totalRemaining) > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                  {n(capacityData.summary.totalRemaining).toLocaleString()} remaining
                 </span>
               </div>
               <div className="h-2 bg-zinc-800 rounded-full overflow-hidden flex">
@@ -270,7 +274,7 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="text-right shrink-0">
-              <p className="text-lg font-bold text-zinc-100">{capacityData.summary.capacityPercent}%</p>
+              <p className="text-lg font-bold text-zinc-100">{n(capacityData.summary.capacityPercent)}%</p>
               <p className="text-[10px] text-zinc-500">available</p>
             </div>
           </div>
@@ -310,10 +314,10 @@ export default function Dashboard() {
                           <span className="ml-1.5 text-[9px] text-green-600">PROVEN</span>
                         )}
                       </td>
-                      <td className="py-1.5 px-2 text-right text-zinc-400">{p.configuredLimit.toLocaleString()}</td>
-                      <td className="py-1.5 px-2 text-right text-zinc-300">{p.sentToday.toLocaleString()}</td>
-                      <td className={`py-1.5 px-2 text-right font-medium ${p.remaining > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {p.remaining.toLocaleString()}
+                      <td className="py-1.5 px-2 text-right text-zinc-400">{n(p.configuredLimit).toLocaleString()}</td>
+                      <td className="py-1.5 px-2 text-right text-zinc-300">{n(p.sentToday).toLocaleString()}</td>
+                      <td className={`py-1.5 px-2 text-right font-medium ${n(p.remaining) > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {n(p.remaining).toLocaleString()}
                       </td>
                       <td className="py-1.5 px-2 text-right">
                         <div className="flex items-center justify-end gap-1.5">
