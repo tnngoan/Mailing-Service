@@ -195,9 +195,12 @@ export default function Dashboard() {
         showToast(data.error ?? 'Failed to upload CSV', 'error');
         return;
       }
-      let msg = `Added ${data.csvAdded.toLocaleString()} emails as priority layer ${data.priorityLayer}`;
-      if (data.skipped > 0) msg += ` (${data.skipped} already in campaign)`;
-      msg += `. Total: ${data.totalRecipients.toLocaleString()} recipients.`;
+      const added = data.csvAdded ?? 0;
+      const skipped = data.skipped ?? 0;
+      const totalR = data.totalRecipients ?? 0;
+      let msg = `Added ${added.toLocaleString()} emails as priority layer ${data.priorityLayer ?? '?'}`;
+      if (skipped > 0) msg += ` (${skipped} already in campaign)`;
+      msg += `. Total: ${totalR.toLocaleString()} recipients.`;
       showToast(msg, 'success');
       refreshCampaigns();
     } catch {
@@ -380,8 +383,11 @@ export default function Dashboard() {
           />
           <div className="space-y-2">
             {recentCampaigns.map((c) => {
-              const remaining = Math.max(0, c.totalRecipients - c.sentCount - c.failedCount);
-              const sentPct = c.totalRecipients > 0 ? Math.round((c.sentCount / c.totalRecipients) * 100) : 0;
+              const sent = c.sentCount ?? 0;
+              const failed = c.failedCount ?? 0;
+              const total = c.totalRecipients ?? 0;
+              const remaining = Math.max(0, total - sent - failed);
+              const sentPct = total > 0 ? Math.round((sent / total) * 100) : 0;
               const isUploading = continueUploadingId === c.id;
               return (
                 <div
@@ -391,7 +397,7 @@ export default function Dashboard() {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-zinc-200 truncate">{c.subject}</p>
                     <p className="text-xs text-zinc-500 mt-0.5">
-                      {c.sentCount.toLocaleString()} sent
+                      {sent.toLocaleString()} sent
                       {remaining > 0 && <span> / {remaining.toLocaleString()} pending</span>}
                       <span className="text-zinc-600 ml-1.5">({sentPct}%)</span>
                     </p>

@@ -237,9 +237,12 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
         onToast(data.error ?? 'Failed to upload CSV', 'error');
         return;
       }
-      let msg = `Added ${data.csvAdded.toLocaleString()} emails as priority layer ${data.priorityLayer}`;
-      if (data.skipped > 0) msg += ` (${data.skipped} already in campaign)`;
-      msg += `. Total: ${data.totalRecipients.toLocaleString()} recipients.`;
+      const added = data.csvAdded ?? 0;
+      const skipped = data.skipped ?? 0;
+      const totalR = data.totalRecipients ?? 0;
+      let msg = `Added ${added.toLocaleString()} emails as priority layer ${data.priorityLayer ?? '?'}`;
+      if (skipped > 0) msg += ` (${skipped} already in campaign)`;
+      msg += `. Total: ${totalR.toLocaleString()} recipients.`;
       onToast(msg, 'success');
       await fetchDetail(campaignId);
       const listRes = await fetch('/api/campaigns');
