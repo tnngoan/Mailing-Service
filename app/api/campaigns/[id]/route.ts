@@ -136,6 +136,41 @@ export async function GET(
           .sort((a, b) => b.sent - a.sent),
       }));
 
+    // Priority breakdown with dynamic labels
+    const priorityCounts = await prisma.recipient.groupBy({
+      by: ['priority', 'status', 'autoIncluded'],
+      where: { campaignId: id },
+      _count: true,
+    });
+
+    const priorityMap = new Map<number, { total: number; pending: number; sent: number; failed: number; autoIncluded: boolean }>();
+    for (const row of priorityCounts) {
+      const p = row.priority ?? 2;
+      const entry = priorityMap.get(p) ?? { total: 0, pending: 0, sent: 0, failed: 0, autoIncluded: false };
+      entry.total += row._count;
+      if (row.status === 'pending') entry.pending += row._count;
+      if (row.status === 'sent') entry.sent += row._count;
+      if (row.status === 'failed') entry.failed += row._count;
+      if (row.autoIncluded) entry.autoIncluded = true;
+      priorityMap.set(p, entry);
+    }
+
+    // Label: CSV layers get "CSV upload #N", auto-included gets "Contacts DB"
+    let csvLayerNum = 0;
+    const priorityBreakdown = Array.from(priorityMap.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([priority, counts]) => {
+        const { autoIncluded, ...rest } = counts;
+        let label: string;
+        if (autoIncluded) {
+          label = 'Contacts DB (auto)';
+        } else {
+          csvLayerNum++;
+          label = `CSV upload #${csvLayerNum}`;
+        }
+        return { priority, label, ...rest };
+      });
+
     const dailyLimit = getTotalDailyLimit();
     const daysRemaining = dailyLimit > 0 ? Math.ceil(pendingCount / dailyLimit) : 0;
 
@@ -146,6 +181,7 @@ export async function GET(
       pendingCount,
       dailyLimit,
       daysRemaining,
+      priorityBreakdown,
       batchHistory: Array.from(days.entries())
         .sort(([a], [b]) => a - b)
         .map(([day, counts]) => ({ day, ...counts })),

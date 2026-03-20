@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import CampaignStatus from '@/components/CampaignStatus';
 
 interface Campaign {
@@ -53,6 +53,10 @@ export default function Dashboard() {
     providers: { provider: string; tier: string; configuredLimit: number; sentToday: number; providerReported: number | null; remaining: number; source: string; status: string; error?: string }[];
   } | null>(null);
   const [capacityLoading, setCapacityLoading] = useState(false);
+
+  const [continueUploadingId, setContinueUploadingId] = useState<number | null>(null);
+  const continueFileRef = useRef<HTMLInputElement>(null);
+  const continueTargetId = useRef<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -145,18 +149,19 @@ export default function Dashboard() {
       } else {
         const daysNeeded = data.daysNeeded ?? 1;
         const totalRecipients = data.totalRecipients ?? 0;
+        const csvCount = data.csvRecipients ?? totalRecipients;
+        const contactsCount = data.contactsRecipients ?? 0;
 
-        if (daysNeeded > 1) {
-          showToast(
-            `Campaign created with ${totalRecipients.toLocaleString()} recipients. Will need ~${daysNeeded} daily batches (${data.dailyLimit}/day). Click "Send Today's Batch" to start.`,
-            'success'
-          );
-        } else {
-          showToast(
-            `Campaign created with ${totalRecipients.toLocaleString()} recipients. Click "Send Today's Batch" to start sending.`,
-            'success'
-          );
+        let msg = `Campaign created: ${csvCount.toLocaleString()} CSV recipients (priority)`;
+        if (contactsCount > 0) {
+          msg += ` + ${contactsCount.toLocaleString()} from contacts DB`;
         }
+        msg += ` = ${totalRecipients.toLocaleString()} total.`;
+        if (daysNeeded > 1) {
+          msg += ` ~${daysNeeded} daily batches needed.`;
+        }
+        msg += ` Click "Send Today's Batch" to start.`;
+        showToast(msg, 'success');
 
         refreshCampaigns();
 
@@ -175,6 +180,38 @@ export default function Dashboard() {
       setSending(false);
     }
   }
+
+  async function handleContinueUpload(campaignId: number, file: File) {
+    setContinueUploadingId(campaignId);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`/api/campaigns/${campaignId}/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error ?? 'Failed to upload CSV', 'error');
+        return;
+      }
+      let msg = `Added ${data.csvAdded.toLocaleString()} emails as priority layer ${data.priorityLayer}`;
+      if (data.skipped > 0) msg += ` (${data.skipped} already in campaign)`;
+      msg += `. Total: ${data.totalRecipients.toLocaleString()} recipients.`;
+      showToast(msg, 'success');
+      refreshCampaigns();
+    } catch {
+      showToast('Network error uploading CSV', 'error');
+    } finally {
+      setContinueUploadingId(null);
+    }
+  }
+
+  // Recent campaigns (within 72h) that can receive new CSV uploads
+  const recentCampaigns = campaigns.filter((c) => {
+    const ageMs = Date.now() - new Date(c.createdAt).getTime();
+    return ageMs < 72 * 60 * 60 * 1000 && c.status !== 'sending';
+  });
 
   const canSend = !!csvFile && !!subject.trim() && !!content.trim() && !sending;
 
@@ -319,6 +356,62 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Continue recent campaign */}
+      {recentCampaigns.length > 0 && (
+        <div className="bg-zinc-900 border border-blue-800/40 rounded-lg p-5 mb-4 space-y-3">
+          <h2 className="text-sm font-semibold text-blue-400 uppercase tracking-wider">
+            Continue Campaign
+          </h2>
+          <p className="text-xs text-zinc-500">
+            Upload a new CSV to add the next priority layer to a recent campaign.
+          </p>
+          <input
+            ref={continueFileRef}
+            type="file"
+            accept=".csv,.txt"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              const targetId = continueTargetId.current;
+              if (file && targetId) handleContinueUpload(targetId, file);
+              if (continueFileRef.current) continueFileRef.current.value = '';
+            }}
+          />
+          <div className="space-y-2">
+            {recentCampaigns.map((c) => {
+              const remaining = Math.max(0, c.totalRecipients - c.sentCount - c.failedCount);
+              const sentPct = c.totalRecipients > 0 ? Math.round((c.sentCount / c.totalRecipients) * 100) : 0;
+              const isUploading = continueUploadingId === c.id;
+              return (
+                <div
+                  key={c.id}
+                  className="flex items-center gap-3 bg-zinc-800/60 border border-zinc-700/50 rounded-md px-4 py-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-zinc-200 truncate">{c.subject}</p>
+                    <p className="text-xs text-zinc-500 mt-0.5">
+                      {c.sentCount.toLocaleString()} sent
+                      {remaining > 0 && <span> / {remaining.toLocaleString()} pending</span>}
+                      <span className="text-zinc-600 ml-1.5">({sentPct}%)</span>
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      continueTargetId.current = c.id;
+                      continueFileRef.current?.click();
+                    }}
+                    disabled={isUploading}
+                    className="shrink-0 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded-md transition-colors text-xs"
+                  >
+                    {isUploading ? 'Uploading...' : 'Upload CSV'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Compose + Send */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 mb-6 space-y-5">

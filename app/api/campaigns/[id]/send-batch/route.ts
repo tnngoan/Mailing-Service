@@ -116,7 +116,7 @@ export async function POST(
       // Assign batchDay to this provider's pending recipients (up to capacity)
       const recipientIds = await prisma.recipient.findMany({
         where: { campaignId: id, status: 'pending', provider: providerName },
-        orderBy: { id: 'asc' },
+        orderBy: [{ priority: 'asc' }, { id: 'asc' }],
         take: takeCount,
         select: { id: true },
       });

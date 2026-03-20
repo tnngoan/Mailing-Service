@@ -51,17 +51,40 @@ export async function POST(req: NextRequest) {
     }
 
     const csvText = await file.text();
-    const emails = parseEmailsFromCSV(csvText);
+    const csvEmails = parseEmailsFromCSV(csvText);
 
-    if (emails.length === 0) {
+    if (csvEmails.length === 0) {
       return NextResponse.json(
         { error: 'No valid email addresses found in the uploaded CSV' },
         { status: 400 }
       );
     }
 
-    // Assign provider segments — each provider gets a fixed slice of the list
-    const segments = assignProviderSegments(emails.length, providers);
+    // Upsert CSV emails into the master Contact table
+    const CHUNK_SIZE = 1000;
+    for (let i = 0; i < csvEmails.length; i += CHUNK_SIZE) {
+      const chunk = csvEmails.slice(i, i + CHUNK_SIZE);
+      await prisma.$transaction(
+        chunk.map((email) =>
+          prisma.contact.upsert({
+            where: { email },
+            create: { email, source: 'csv-upload' },
+            update: {},
+          })
+        )
+      );
+    }
+
+    // Get rest of contacts (not in CSV) for auto-include as lowest tier
+    const allContacts = await prisma.contact.findMany({ select: { email: true } });
+    const csvSet = new Set(csvEmails);
+    const restEmails = allContacts.map((c) => c.email).filter((e) => !csvSet.has(e));
+
+    // Combined: CSV first (priority 1), rest of contacts (priority 2, auto-included)
+    const allEmails = [...csvEmails, ...restEmails];
+    const totalCount = allEmails.length;
+
+    const segments = assignProviderSegments(totalCount, providers);
 
     // Create campaign
     const campaign = await prisma.campaign.create({
@@ -69,18 +92,17 @@ export async function POST(req: NextRequest) {
         subject,
         content,
         status: 'pending',
-        totalRecipients: emails.length,
+        totalRecipients: totalCount,
       },
     });
 
-    // Bulk-insert recipients with pre-assigned providers
-    const CHUNK_SIZE = 1000;
-    for (let i = 0; i < emails.length; i += CHUNK_SIZE) {
-      const chunk = emails.slice(i, i + CHUNK_SIZE);
+    // Bulk-insert: CSV = priority 1, rest = priority 2 (autoIncluded)
+    for (let i = 0; i < allEmails.length; i += CHUNK_SIZE) {
+      const chunk = allEmails.slice(i, i + CHUNK_SIZE);
       await prisma.recipient.createMany({
         data: chunk.map((email, chunkIdx) => {
           const globalIdx = i + chunkIdx;
-          // Find which provider segment this recipient belongs to
+          const isCsv = globalIdx < csvEmails.length;
           const segment = segments.find(
             (s) => globalIdx >= s.startIndex && globalIdx < s.endIndex
           );
@@ -89,13 +111,15 @@ export async function POST(req: NextRequest) {
             email,
             status: 'pending',
             provider: segment?.provider.name ?? providers[0].name,
+            priority: isCsv ? 1 : 2,
+            autoIncluded: !isCsv,
           };
         }),
       });
     }
 
     const dailyLimit = getTotalDailyLimit();
-    const daysNeeded = Math.ceil(emails.length / dailyLimit);
+    const daysNeeded = Math.ceil(totalCount / dailyLimit);
 
     return NextResponse.json(
       {
@@ -103,6 +127,9 @@ export async function POST(req: NextRequest) {
         dailyLimit,
         daysNeeded,
         providerCount: providers.length,
+        csvRecipients: csvEmails.length,
+        contactsRecipients: restEmails.length,
+        priorityLayers: 2,
         providerSegments: segments.map((s) => ({
           provider: s.provider.name,
           count: s.count,

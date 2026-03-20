@@ -23,16 +23,26 @@ model Campaign {
 }
 
 model Recipient {
-  id         Int       @id @default(autoincrement())
-  campaignId Int
-  email      String
-  status     String    @default("pending") // pending | sent | failed
-  provider   String?
-  sentAt     DateTime?
-  error      String?
-  batchDay   Int?
-  campaign   Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  id           Int       @id @default(autoincrement())
+  campaignId   Int
+  email        String
+  status       String    @default("pending") // pending | sent | failed
+  provider     String?
+  sentAt       DateTime?
+  error        String?
+  batchDay     Int?
+  priority     Int       @default(2)
+  autoIncluded Boolean   @default(false) // true = auto-added from contacts DB (lowest tier, gets bumped)
+  campaign     Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   @@index([campaignId, status])
   @@index([campaignId, batchDay])
+  @@index([campaignId, status, priority])
+}
+
+model Contact {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  createdAt DateTime @default(now())
+  source    String   @default("csv-upload")
 }

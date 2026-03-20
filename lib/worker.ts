@@ -90,7 +90,7 @@ export async function processBatch(campaignId: number, batchDay: number): Promis
     // Get all recipients for this batch, grouped by provider
     const batchRecipients = await prisma.recipient.findMany({
       where: { campaignId, batchDay, status: 'pending' },
-      orderBy: { id: 'asc' },
+      orderBy: [{ priority: 'asc' }, { id: 'asc' }],
     });
 
     if (batchRecipients.length === 0) {

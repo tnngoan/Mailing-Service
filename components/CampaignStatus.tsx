@@ -33,10 +33,20 @@ interface DailyProviderEntry {
   providers: { provider: string; sent: number; failed: number }[];
 }
 
+interface PriorityBreakdown {
+  priority: number;
+  label: string;
+  total: number;
+  pending: number;
+  sent: number;
+  failed: number;
+}
+
 interface CampaignDetail extends Campaign {
   pendingCount: number;
   dailyLimit: number;
   daysRemaining: number;
+  priorityBreakdown?: PriorityBreakdown[];
   batchHistory: { day: number; sent: number; failed: number }[];
   providerReport: ProviderReport[];
   providerAssignments: ProviderAssignment[];
@@ -74,6 +84,10 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
   const [reassigning, setReassigning] = useState<string | null>(null);
+  const [uploadingId, setUploadingId] = useState<number | null>(null);
+  const uploadInputRef = useCallback((node: HTMLInputElement | null) => {
+    if (node) node.value = '';
+  }, []);
 
   const hasSending = campaigns.some((c) => c.status === 'sending');
 
@@ -209,6 +223,34 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
     }
   }
 
+  async function handleUploadCsv(campaignId: number, file: File) {
+    setUploadingId(campaignId);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`/api/campaigns/${campaignId}/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        onToast(data.error ?? 'Failed to upload CSV', 'error');
+        return;
+      }
+      let msg = `Added ${data.csvAdded.toLocaleString()} emails as priority layer ${data.priorityLayer}`;
+      if (data.skipped > 0) msg += ` (${data.skipped} already in campaign)`;
+      msg += `. Total: ${data.totalRecipients.toLocaleString()} recipients.`;
+      onToast(msg, 'success');
+      await fetchDetail(campaignId);
+      const listRes = await fetch('/api/campaigns');
+      if (listRes.ok) onUpdate(await listRes.json());
+    } catch {
+      onToast('Network error uploading CSV', 'error');
+    } finally {
+      setUploadingId(null);
+    }
+  }
+
   if (campaigns.length === 0) return null;
 
   return (
@@ -318,6 +360,29 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
                 </div>
               )}
 
+              {/* Upload additional CSV — available anytime except while actively sending */}
+              {c.status !== 'sending' && (
+                <div className="flex items-center gap-2">
+                  <label className="flex-1 relative">
+                    <input
+                      type="file"
+                      accept=".csv,.txt"
+                      ref={uploadInputRef}
+                      disabled={uploadingId === c.id}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleUploadCsv(c.id, file);
+                        e.target.value = '';
+                      }}
+                      className="hidden"
+                    />
+                    <span className="block w-full text-center text-xs px-3 py-2 rounded-md border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 cursor-pointer transition-colors">
+                      {uploadingId === c.id ? 'Uploading...' : 'Upload another CSV (new priority layer)'}
+                    </span>
+                  </label>
+                </div>
+              )}
+
               {/* Expanded detail */}
               {isExpanded && detail && detail.id === c.id && (
                 <div className="border-t border-zinc-800 pt-3 space-y-3">
@@ -338,6 +403,28 @@ export default function CampaignStatus({ campaigns, onUpdate, onToast }: Props) 
                       <p className="text-[10px] text-zinc-500 uppercase">days left</p>
                     </div>
                   </div>
+
+                  {/* Priority breakdown */}
+                  {detail.priorityBreakdown && detail.priorityBreakdown.length > 1 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-zinc-500 font-medium">Priority breakdown</p>
+                      {detail.priorityBreakdown.map((p) => {
+                        const pct = p.total > 0 ? Math.round((p.sent / p.total) * 100) : 0;
+                        return (
+                          <div key={p.priority} className="flex items-center gap-3 text-xs bg-zinc-800/50 rounded px-3 py-2">
+                            <span className={`font-medium w-32 ${p.priority === 1 ? 'text-blue-400' : 'text-zinc-400'}`}>
+                              {p.label}
+                            </span>
+                            <span className="text-zinc-300">{p.total.toLocaleString()} total</span>
+                            <span className="text-green-400">{p.sent.toLocaleString()} sent</span>
+                            {p.pending > 0 && <span className="text-yellow-400">{p.pending.toLocaleString()} pending</span>}
+                            {p.failed > 0 && <span className="text-red-400">{p.failed.toLocaleString()} failed</span>}
+                            <span className="text-zinc-500 ml-auto">{pct}%</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
 
                   {/* Provider assignment table */}
                   {detail.providerAssignments && detail.providerAssignments.length > 0 && (
