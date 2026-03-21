@@ -41,9 +41,15 @@ export function getProviders(): EmailProvider[] {
   ];
 
   const tierOrder = { proven: 0, untested: 1, unreliable: 2 };
+
+  // Optional: restrict to specific providers via ACTIVE_PROVIDERS env var (comma-separated)
+  const activeFilter = (process.env.ACTIVE_PROVIDERS ?? '').trim().toLowerCase();
+  const allowedNames = activeFilter ? activeFilter.split(',').map((s) => s.trim()).filter(Boolean) : null;
+
   const providers = factories
     .map((fn) => fn())
     .filter((p): p is EmailProvider => p !== null)
+    .filter((p) => !allowedNames || allowedNames.includes(p.name))
     // Proven first, then untested, then unreliable. Within same tier, biggest capacity first.
     .sort((a, b) => tierOrder[a.tier] - tierOrder[b.tier] || b.dailyLimit - a.dailyLimit);
 
