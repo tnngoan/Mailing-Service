@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import CampaignStatus from '@/components/CampaignStatus';
+import { loadLatestDraft, markDraftAsSent } from '@/lib/newsletter';
 
 function n(val: number | null | undefined): number {
   return val ?? 0;
@@ -48,6 +49,8 @@ export default function Dashboard() {
   const [images, setImages] = useState<File[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [sending, setSending] = useState(false);
+  const [loadingDraft, setLoadingDraft] = useState(false);
+  const [draftId, setDraftId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [totalDailyLimit, setTotalDailyLimit] = useState<number>(0);
@@ -134,6 +137,21 @@ export default function Dashboard() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
+  async function handleLoadDraft() {
+    setLoadingDraft(true);
+    try {
+      const draft = await loadLatestDraft();
+      setSubject(draft.subject);
+      setContent(draft.body);
+      setDraftId(draft.id);
+      showToast('AI draft loaded! Review and edit before sending.', 'success');
+    } catch {
+      showToast('No draft available. Generate one in Supabase first, or write manually.', 'error');
+    } finally {
+      setLoadingDraft(false);
+    }
+  }
+
   async function handleSend() {
     if (!csvFile || !subject.trim() || !content.trim()) return;
 
@@ -168,6 +186,12 @@ export default function Dashboard() {
         showToast(msg, 'success');
 
         refreshCampaigns();
+
+        // Mark AI draft as sent if one was loaded
+        if (draftId) {
+          markDraftAsSent(draftId);
+          setDraftId(null);
+        }
 
         // Reset form
         setSubject('');
@@ -479,6 +503,19 @@ export default function Dashboard() {
             </button>
           )}
         </div>
+
+        {/* Load AI Draft */}
+        <button
+          type="button"
+          onClick={handleLoadDraft}
+          disabled={loadingDraft}
+          className="w-full flex items-center justify-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-600/40 hover:border-purple-500/50 disabled:opacity-40 disabled:cursor-not-allowed rounded-md px-3 py-2.5 text-sm text-purple-300 hover:text-purple-200 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          {loadingDraft ? 'Loading draft...' : draftId ? 'Draft loaded — edit below' : 'Load AI Draft'}
+        </button>
 
         {/* Subject */}
         <div>
